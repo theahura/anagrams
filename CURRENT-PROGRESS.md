@@ -280,10 +280,88 @@ changes.
   served. HomeScreen now exposes `streak`, `best`, `completedToday`
   props.
 
+### `feat/initial-game` — Bundle slim-down via precomputed lemmas (this commit)
+
+Pre-computes the trivial-inflection lemma table at dictionary-build
+time and removes `wink-lemmatizer` from the runtime dependency tree.
+Cuts the production JS bundle from 1.82 MB → 93 kB (95% reduction);
+gzipped JS drops from 633 kB → 36 kB. Runtime semantics of
+`isTrivialInflection` are preserved exactly.
+
+#### Why
+`wink-lemmatizer` (used at runtime only by
+`src/trivialInflection.js`) transitively pulls in `wink-lexicon`,
+which ships ~3 MB of WordNet/lexicon JSON — most of the 1.8 MB JS
+bundle. The lookup data the game actually needs is small and finite,
+so we precompute it offline.
+
+#### New / changed
+- `scripts/build-lemmas.js` (new) — maintainer-only script. Exports
+  `buildLemmaIndex(words)` (pure helper) and a `main()` that reads
+  `data/dictionary.json` and writes `data/lemmas.json`. Imports
+  `wink-lemmatizer`; this is the **only** file that does. Wired up
+  via `npm run build-lemmas`.
+- `data/lemmas.json` (new, committed) — schema
+  `{ lemmas: { word: [lemma1, lemma2?] } }`. ~55,500 entries,
+  1.36 MB raw / 267 kB gzipped. Identity entries omitted; lemma list
+  deduped; non-vocabulary lemmas filtered.
+- `src/trivialInflection.js` — rewritten. Removed
+  `import lem from 'wink-lemmatizer'`. New signature
+  `isTrivialInflection(answer, root, lemmaIndex)`. `lemmaIndex`
+  accepts either a `Map<string, string[]>` or a plain object. The
+  `FORCE_NON_TRIVIAL` override list and trailing-`e` drop-e
+  heuristic are preserved verbatim; the heuristic now checks
+  `lemmas.includes(r.slice(0,-1))` instead of calling the lemmatizer.
+- `src/dictionary.js` — `loadDictionary(json, lemmasJson?)` gained an
+  optional second arg. The returned object now exposes
+  `dict.lemmaIndex` (a `Map<string, string[]>`). When `lemmasJson` is
+  omitted, `lemmaIndex` is empty (back-compat for tests).
+- `src/anagramRules.js` — `canFormWord` threads `dict.lemmaIndex`
+  into the `isTrivialInflection(word, w, dict.lemmaIndex)` call.
+- `src/components/App.vue` — `ensureDictionary` now `Promise.all`s
+  fetches of `data/dictionary.json` and `data/lemmas.json`, then
+  `Promise.all`s the two `.json()` parses, then calls
+  `loadDictionary(dictJson, lemmasJson)`.
+- `package.json` — `wink-lemmatizer` moved from `dependencies` to
+  `devDependencies`. New `npm run build-lemmas` script.
+
+#### Tests added
+- `tests/buildLemmas.test.js` (new) — 5 unit tests for
+  `buildLemmaIndex`: maps inflected words → lemma when in vocab,
+  maps simple plurals → singular, omits identity-only words, captures
+  the over-stem case (`rated → rat`) so the trailing-`e` heuristic
+  fires, omits entries whose only candidates are absent from the
+  vocabulary.
+- `tests/trivialInflection.test.js` — rewritten to thread a fixture
+  lemma `Map` through every assertion. Same 12 spec-rule assertions
+  still hold.
+- `tests/anagramRules.test.js`, `tests/game.test.js`,
+  `tests/app.smoke.test.js` — updated to also load
+  `data/lemmas.json` and pass it through `loadDictionary`. The smoke
+  test's `fetch` stub now discriminates by URL to return either
+  dictionary or lemmas JSON.
+
+#### Bundle impact
+- **Before:** `dist/assets/index-*.js` 1,819 kB raw / 633 kB gzipped.
+- **After:** `dist/assets/index-*.js` 93 kB raw / 36 kB gzipped (95%
+  smaller). New `dist/assets/lemmas-*.json` 1,357 kB raw / 267 kB
+  gzipped, lazy-fetched in parallel with the dictionary on first
+  game start.
+- **Total raw payload** (JS + dict + lemmas): 3,937 kB → 3,568 kB.
+- **Gzipped payload:** 1,110 kB → 780 kB. Crucially, **initial JS**
+  drops from 633 kB gzipped to 36 kB gzipped — first paint is now
+  near-instant.
+- **Build time:** 89 s → 0.6 s (147× faster, since wink-lexicon's
+  massive JSON no longer needs to be transformed by Vite/Rollup).
+
+#### Verified
+- `npm test` — 132/132 passing (was 127; +5 buildLemmas).
+- `npm run build` — production bundle builds in 0.6 s.
+- `npm run build-lemmas` — regenerates `data/lemmas.json`
+  deterministically from `data/dictionary.json` (offline).
+
 ## Open follow-ups (next commits)
 
-- Performance: bundled JS is 1.8MB (mostly `wink-lemmatizer`); consider
-  lazy-loading or pre-computing trivial inflections offline.
 - A11y pass: keyboard navigation, focus rings, ARIA on tile rack;
   switch click handlers from `@mousedown.left.prevent` to `@click`
   (with `@mousedown.prevent` only for focus-suppression) so keyboard

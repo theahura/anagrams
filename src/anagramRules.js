@@ -92,7 +92,7 @@ export function canFormWord(typed, board, dict) {
       continue;
     }
 
-    if (consumedWords.some((w) => isTrivialInflection(word, w))) {
+    if (consumedWords.some((w) => isTrivialInflection(word, w, dict.lemmaIndex))) {
       bestFailure = bumpFailure(bestFailure, 'trivial-inflection', FAILURE_PRIORITY);
       continue;
     }

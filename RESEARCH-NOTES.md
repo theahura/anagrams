@@ -421,3 +421,118 @@ localStorage pitfalls.
   expected use).
 - LongestWord-best tracking — just score for v5; longest can be added
   in a future polish pass.
+
+## Bundle slim-down: precomputed lemmas (v6 commit)
+
+Open follow-up #1 from CURRENT-PROGRESS.md: production JS bundle is
+1.82 MB (633 kB gzipped). Profiling root cause: `wink-lemmatizer`
+transitively pulls `wink-lexicon` (13 MB on disk; ships ~3 MB of WordNet
+sense indices and exception lists into the bundle). Used only by
+`src/trivialInflection.js`, which is only called when the player
+submits a word that consumes a parent word.
+
+### Findings (nori-knowledge-researcher + spot inspection)
+
+- **Compresses well**: a `{word: [lemma]}` map for ~178k TWL06 words
+  packs to roughly 8-15% of raw size after gzip; expected payload
+  ~150-400 kB raw → ~30-60 kB gzipped if we drop identity entries.
+  Massively cheaper than the 633 kB lemmatizer mass currently shipped.
+- **JSON.parse cost**: at this size, parse is <50 ms on midrange
+  mobile. Same hot-path as `dictionary.json`; load both in
+  `Promise.all`.
+- **Memory residency**: ~10-20 MB resident for a 178k Map. Trim by
+  omitting identity (`lemma === word`) entries and lemmas not present
+  in TWL06.
+- **wink-lemmatizer behavior**: `verb`/`noun`/`adjective` each return
+  the *input unchanged* when no rule fires. Build-time emitter must
+  drop these — present-but-equal entries waste bytes.
+- **Adjective lemmatizer false-positives**: many short 3-letter words
+  get spurious adjective lemmas (root cause of the existing
+  `FORCE_NON_TRIVIAL` overrides). Decision: keep the override list at
+  runtime (not build time) so we can update overrides without
+  regenerating `lemmas.json`. Slight runtime cost (a Set lookup) is
+  trivial.
+- **Trailing-`e` heuristic** stays at runtime in
+  `trivialInflection.js`. Reason: the heuristic checks
+  `r.endsWith('e') && (a.startsWith(r) || a === dropE+'ing')` where
+  `r` is the parent word (only known at submit time). At lookup we
+  ask: is `r.slice(0,-1) ∈ lemmasOf(a)`? Same lookup table — no
+  separate "trailing-e" data.
+- **Single file vs. separate**: emit `data/lemmas.json` as a separate
+  asset. Reasons: (a) keeps cache lifetimes independent;
+  (b) lemma changes diff cleanly in git; (c) Vite handles separate
+  JSON assets identically to dictionary.json (asset-hash naming,
+  HTTP/2 multiplex). Extending dictionary.json would couple their
+  invalidation.
+- **Build-dict is a maintainer step**: `npm run build-dict` is
+  separate from `npm run build` (see package.json). `data/lemmas.json`
+  gets committed alongside `data/dictionary.json`. CI does not need
+  `wink-lemmatizer` to build.
+- **Move `wink-lemmatizer` → devDependencies**: only `build-dict.js`
+  imports it. After the refactor, no runtime module imports it. Vite
+  tree-shake will exclude it from the production bundle.
+
+### Decisions
+
+1. **Schema**: `data/lemmas.json` = `{ "word": ["lemma1", "lemma2?"] }`
+   only when at least one of `verb(w)`/`noun(w)`/`adjective(w)` differs
+   from `w` itself. Lemma list is the deduped union of those three
+   minus `w`. Words with no non-self lemma are omitted (absent key
+   means "no lemma relationship").
+2. **Filter to TWL06 membership**: only emit entries where the word
+   itself is in TWL06 (already the case — input is the post-profanity
+   list). Lemmas may or may not be in TWL06; we keep them anyway since
+   the runtime check is `lemmas.includes(parentWord)` and `parentWord`
+   came from the on-table `words` (which are TWL06-validated). If a
+   lemma is non-TWL it just won't ever match — wasted bytes but
+   correct behavior. Cheap to filter though, so we will: drop lemmas
+   not in the TWL06 set.
+3. **Runtime API**: `isTrivialInflection(answer, root, lemmaIndex)`
+   becomes a pure 3-arg function. `lemmaIndex` is a `Map<string,
+   string[]>` (or any object with `.get(word)` returning lemmas).
+   Tests pass a fixture index. Production threads through `dict`.
+4. **Dictionary loader change**: `loadDictionary(json, lemmasJson?)`
+   gains an optional second argument and exposes `dict.lemmaIndex`
+   (Map). When omitted, `lemmaIndex` is empty (back-compat for tests
+   that don't care about lemmas).
+5. **anagramRules**: `canFormWord` already gets `dict`. Replace
+   `isTrivialInflection(word, w)` with
+   `isTrivialInflection(word, w, dict.lemmaIndex)`.
+6. **App.vue**: load both JSONs in parallel (`Promise.all`), pass
+   both to `loadDictionary`.
+7. **Override list (`FORCE_NON_TRIVIAL`)** stays in
+   `src/trivialInflection.js` runtime. Cheap, low-churn,
+   independently editable.
+
+### Tests
+
+- `tests/trivialInflection.test.js`: thread a fixture lemma index
+  through every assertion. Fixture covers every word the existing
+  tests touch: `nubs→[nub]`, `books→[book]`, `cats→[cat]`,
+  `walked→[walk]`, `walking→[walk]`, `rated→[rat]`. The "true
+  anagram" cases (`snub`, `brook`, `refine`, `redefine`) get *no*
+  entry — i.e., absent from the lemma index → not trivial. Identity
+  case (`cat→cat`) is excluded by the `a === r` short-circuit.
+- `tests/dictionary.test.js`: add a test that `loadDictionary(json,
+  lemmasJson)` exposes `dict.lemmaIndex` and that `lemmaIndex.get(w)`
+  returns the array.
+- `tests/anagramRules.test.js`: existing tests already exercise the
+  trivial-inflection failure mode; update fixture dict to include a
+  lemma index so the path still triggers.
+- New: `tests/buildDict.test.js` — small unit test for the
+  build-time helper that constructs the lemma index from a tiny word
+  list (so we don't ship `wink-lemmatizer` use only via a script).
+  Refactor `scripts/build-dict.js` to expose a pure
+  `buildLemmaIndex(words)` helper that the test imports.
+
+### Out of scope (intentional)
+
+- Snapshot-test / parity-test of the full TWL06 lemma map. The
+  unit-tested `buildLemmaIndex` plus the existing
+  trivialInflection tests provide adequate coverage; a full-corpus
+  snapshot bloats the repo with no signal-to-noise gain.
+- Bundle-size CI threshold. Manual verification of bundle drop is
+  documented in CURRENT-PROGRESS.md; future-us can add a guard if
+  regressions appear.
+- Moving `FORCE_NON_TRIVIAL` to build time. Negligible runtime cost,
+  better git diffability at runtime.

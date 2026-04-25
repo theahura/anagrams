@@ -7,12 +7,14 @@ import { canFormWord } from '../src/anagramRules.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DICT_PATH = path.resolve(__dirname, '..', 'data', 'dictionary.json');
+const LEMMAS_PATH = path.resolve(__dirname, '..', 'data', 'lemmas.json');
 
 let dict;
 
 beforeAll(() => {
   const raw = JSON.parse(readFileSync(DICT_PATH, 'utf8'));
-  dict = loadDictionary(raw);
+  const lemmasRaw = JSON.parse(readFileSync(LEMMAS_PATH, 'utf8'));
+  dict = loadDictionary(raw, lemmasRaw);
 });
 
 function board(loose, words = []) {
@@ -83,8 +85,8 @@ describe('canFormWord — using preexisting words', () => {
 
   it('rejects when a word is used but additional unrelated letters are not in loose pool', () => {
     const result = canFormWord('books', board(['s'], ['rook']), dict);
-    // 'books' would need rook's letters but rook has 'r' — letters mismatch
     expect(result.ok).toBe(false);
+    expect(result.reason).toBe('letters-unavailable');
   });
 
   it('accepts redefine formed from refine + d + e', () => {

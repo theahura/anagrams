@@ -39,15 +39,23 @@ async function ensureDictionary() {
   if (dict.value) return dict.value;
   dictLoading.value = true;
   try {
-    const url = new URL('../../data/dictionary.json', import.meta.url);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    dict.value = loadDictionary(json);
+    const dictUrl = new URL('../../data/dictionary.json', import.meta.url);
+    const lemmasUrl = new URL('../../data/lemmas.json', import.meta.url);
+    const [dictRes, lemmasRes] = await Promise.all([
+      fetch(dictUrl),
+      fetch(lemmasUrl),
+    ]);
+    if (!dictRes.ok) throw new Error(`dictionary HTTP ${dictRes.status}`);
+    if (!lemmasRes.ok) throw new Error(`lemmas HTTP ${lemmasRes.status}`);
+    const [dictJson, lemmasJson] = await Promise.all([
+      dictRes.json(),
+      lemmasRes.json(),
+    ]);
+    dict.value = loadDictionary(dictJson, lemmasJson);
     return dict.value;
   } catch (err) {
     dictError.value = err.message;
-    throw err;
+    return null;
   } finally {
     dictLoading.value = false;
   }
@@ -55,6 +63,7 @@ async function ensureDictionary() {
 
 async function startGame(mode) {
   const d = await ensureDictionary();
+  if (!d) return;
   const date = todayUTC();
   game.value = createGame({ mode, date }, d);
   screen.value = 'game';

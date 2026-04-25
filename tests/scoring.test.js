@@ -11,12 +11,14 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DICT_PATH = path.resolve(__dirname, '..', 'data', 'dictionary.json');
+const LEMMAS_PATH = path.resolve(__dirname, '..', 'data', 'lemmas.json');
 
 let dict;
 
 beforeAll(() => {
   const raw = JSON.parse(readFileSync(DICT_PATH, 'utf8'));
-  dict = loadDictionary(raw);
+  const lemmasRaw = JSON.parse(readFileSync(LEMMAS_PATH, 'utf8'));
+  dict = loadDictionary(raw, lemmasRaw);
 });
 
 describe('scoreWord', () => {

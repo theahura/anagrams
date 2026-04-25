@@ -7,16 +7,22 @@ import App from '../src/components/App.vue';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DICT_PATH = path.resolve(__dirname, '..', 'data', 'dictionary.json');
+const LEMMAS_PATH = path.resolve(__dirname, '..', 'data', 'lemmas.json');
 const dictionaryJson = JSON.parse(readFileSync(DICT_PATH, 'utf8'));
+const lemmasJson = JSON.parse(readFileSync(LEMMAS_PATH, 'utf8'));
 
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => dictionaryJson,
-    }))
+    vi.fn(async (url) => {
+      const href = String(url);
+      const body = href.endsWith('lemmas.json') ? lemmasJson : dictionaryJson;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+      };
+    })
   );
   const fakeStorage = (() => {
     const data = new Map();
@@ -92,6 +98,29 @@ describe('App smoke', () => {
     await flushPromises();
     expect(wrapper.text()).toMatch(/Streak\s*2(?!\d)/);
     expect(wrapper.text()).toMatch(/Best\s*247(?!\d)/);
+  });
+
+  it('surfaces a dictError banner when the lemmas asset fails to load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url) => {
+        const href = String(url);
+        if (href.endsWith('lemmas.json')) {
+          return { ok: false, status: 500, json: async () => ({}) };
+        }
+        return { ok: true, status: 200, json: async () => dictionaryJson };
+      })
+    );
+
+    const wrapper = mount(App);
+    const dailyBtn = wrapper.findAll('button').find((b) => b.text().includes('Daily'));
+    await dailyBtn.trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    const banner = wrapper.find('.error-banner');
+    expect(banner.exists()).toBe(true);
+    expect(banner.text().toLowerCase()).toContain('lemmas');
   });
 
   it('rejects an unknown word with feedback', async () => {

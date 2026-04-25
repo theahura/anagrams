@@ -1,5 +1,3 @@
-import lem from 'wink-lemmatizer';
-
 const FORCE_TRIVIAL = new Set();
 const FORCE_NON_TRIVIAL = new Set([
   'sin|sines', 'sag|sages', 'rot|rotes', 'ras|rases', 'sit|sited',
@@ -22,7 +20,7 @@ const FORCE_NON_TRIVIAL = new Set([
   'relocate|relocatees',
 ]);
 
-export function isTrivialInflection(answer, root) {
+export function isTrivialInflection(answer, root, lemmaIndex) {
   const a = answer.toLowerCase();
   const r = root.toLowerCase();
   if (a === r) return false;
@@ -30,18 +28,13 @@ export function isTrivialInflection(answer, root) {
   if (FORCE_TRIVIAL.has(key)) return true;
   if (FORCE_NON_TRIVIAL.has(key)) return false;
 
-  for (const fn of [lem.verb, lem.noun, lem.adjective]) {
-    if (fn(a) === r) return true;
-  }
+  const lemmas = lemmaIndex.get(a) || [];
+  if (lemmas.includes(r)) return true;
 
   if (r.endsWith('e')) {
     const dropE = r.slice(0, -1);
     const looksLikeInflection = a.startsWith(r) || a === dropE + 'ing';
-    if (looksLikeInflection) {
-      for (const fn of [lem.verb, lem.noun, lem.adjective]) {
-        if (fn(a) + 'e' === r) return true;
-      }
-    }
+    if (looksLikeInflection && lemmas.includes(dropE)) return true;
   }
 
   return false;
