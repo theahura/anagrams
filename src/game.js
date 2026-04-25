@@ -79,6 +79,7 @@ export function endGame(game, nowMs) {
     totalTimeMs,
     missedDrawCount: game.missedDrawCount,
     words: game.pool.words.map((w) => w.word),
+    history,
   };
 }
 

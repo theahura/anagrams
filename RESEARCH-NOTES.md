@@ -172,3 +172,59 @@ Sources of truth diverge:
   hint.
 - All existing submit logic stays the same — typed input remains the
   source of truth for `submitWord`.
+
+## Wordle-style share grid (v3 commit)
+
+Spec line 55-56 explicitly asks for a "wordle style" share. Current
+`generateShareText` is plain text only, no emoji block. Researched
+Wordle/Connections/Quordle conventions and Snatch precedent.
+
+Findings:
+- Header format convention: `<Game> <id> <score>` on one line. Wordle uses
+  `Wordle 1,064 4/6`. We don't have puzzle numbers; use the date for daily
+  (`Anagrams 2026-04-25 — 142`) and `Random` literal for random
+  (`Anagrams Random — 50`).
+- No URL footer (Wordle/Connections precedent).
+- Body grid: variable-width rows are fine. Do NOT pad with `⬛` or spaces —
+  rendering is inconsistent across iMessage / Discord / VS Code / Twitter
+  due to non-monospace emoji widths.
+- Snatch / anagram games have no established share format — we have
+  latitude.
+- Twitter limit 280 chars; emojis count as 2 UTF-16 code units. A 30-word
+  game can exceed that. YAGNI: skip truncation in v3, revisit if it bites.
+- Use U+1F7E9 (🟩) and U+1F7E8 (🟨) — render reliably as emoji without
+  needing VS-16 variation selectors. Avoid `□`/`■`/colored boxes that need
+  variation selectors.
+- Green/yellow semantic inversion vs Wordle: in Wordle 🟨 is "wrong
+  position." Here 🟨 will mean "letters carried over from a consumed
+  parent word" (recycled) and 🟩 means "new letters added beyond the
+  parent." This is a deliberate metaphor reuse: "yellow = recycled, green
+  = new value." Researcher flagged the cognitive collision but it is
+  defensible since the games are obviously different.
+
+Format spec (v3):
+
+```
+Anagrams 2026-04-25 — 142
+
+🟩🟩🟩🟩
+🟨🟨🟨🟨🟩🟩
+🟨🟨🟨🟨🟨🟨🟩🟩
+
+Longest 8 · Time 5:00
+```
+
+Per row: `yellow = sum(parent.length for parent in parents)`,
+`green = word.length - yellow`. The spec rule "must use all letters of
+any consumed preexisting word" means sum(parent lengths) ≤ word.length
+always — green count is non-negative.
+
+Random mode header: `Anagrams Random — 50`.
+Empty history: header + blank + footer (no rows). Existing tests
+(date/score/longestLen/Random/no-date/determinism) continue to pass with
+this format because they only assert substring presence.
+
+API change: `generateShareText` gains a new `history` param
+(`{word, parents}[]`). `ScoreScreen.vue` passes `result.history` (added to
+`endGame` output, currently absent — `game.history` already exists, just
+need to surface it through `endGame`'s return).

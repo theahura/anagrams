@@ -18,6 +18,7 @@ async function onShare() {
     score: props.result.score,
     longestWord: props.result.longestWord,
     totalTimeMs: props.result.totalTimeMs,
+    history: props.result.history,
   });
   try {
     await navigator.clipboard.writeText(text);

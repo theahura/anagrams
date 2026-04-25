@@ -103,14 +103,64 @@ input.
 - `npm run dev` — boots; HTML, vue components, dictionary asset all
   served. Tiles and word rows respond to clicks.
 
+### `feat/initial-game` — Wordle-style share grid (this commit)
+
+Replaces the flat-text share output with a Wordle-style emoji block that
+visually summarises the player's run, satisfying APPLICATION-SPEC.md's
+"share button (come up with something clever that we can use that is
+wordle style)" requirement.
+
+#### Format
+
+```
+Anagrams 2026-04-25 — 142
+
+🟩🟩🟩🟩
+🟨🟨🟨🟨🟩🟩
+🟨🟨🟨🟨🟨🟨🟩🟩
+
+Longest 8 · Time 5:00
+```
+
+Per row: 🟨 count = sum of consumed parent-word lengths (recycled
+letters); 🟩 count = remainder (newly-added letters). Random mode shows
+`Anagrams Random — <score>` instead of a date. Empty history → header +
+footer only, no emoji rows.
+
+#### New / changed
+- `src/share.js` — rewritten. New optional `history` param; emits header
+  + emoji rows + footer. Uses U+1F7E9 / U+1F7E8 (large green/yellow
+  squares) for portability across Discord / iMessage / Twitter without
+  variation selectors. No row padding — emoji widths are not consistent
+  across renderers (VS Code / Discord desktop / iMessage all differ);
+  ragged left-aligned rows are the convention.
+- `src/game.js` — `endGame` result now exposes `history` so the score
+  screen can hand it to the share function.
+- `src/components/ScoreScreen.vue` — passes `result.history` into
+  `generateShareText`.
+
+#### Tests added
+- `tests/share.test.js` — 6 new emoji-grid tests covering: empty
+  history, all-green original word, single-parent steal (yellow + green
+  mix), three-row chain (`fine → refine → redefine`), multi-parent
+  all-yellow steal, footer format with longest length and time.
+- Pre-existing share tests (date / score / longest-length / random
+  header / determinism) continue to pass — the new format still contains
+  those substrings.
+
+#### Verified
+- `npm test` — 96/96 passing (was 90; +6 new share tests).
+- No changes to game logic, scoring, or anagram rules.
+
 ## Open follow-ups (next commits)
 
 - Performance: bundled JS is 1.8MB (mostly `wink-lemmatizer`); consider
   lazy-loading or pre-computing trivial inflections offline.
 - A11y pass: keyboard navigation, focus rings, ARIA on tile rack.
 - Persistence (local-storage) for daily streak / past scores.
-- Stronger share text (Wordle-style emoji block summarising flow).
 - "Clear input" button to reset typed input quickly.
 - Click an already-`used` tile to remove the matching letter from input
   (currently it just appends another copy).
+- Truncate share grid for very long runs (Twitter 280-char limit) — not
+  hit by typical games but possible.
 - noridoc initialization once folder structure stabilises.

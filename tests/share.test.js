@@ -56,3 +56,105 @@ describe('generateShareText — random mode', () => {
     expect(text).toContain('Random');
   });
 });
+
+describe('generateShareText — emoji grid', () => {
+  const GREEN = '\u{1F7E9}';
+  const YELLOW = '\u{1F7E8}';
+
+  it('produces no emoji rows when history is empty', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 0,
+      history: [],
+    });
+    expect(text).not.toContain(GREEN);
+    expect(text).not.toContain(YELLOW);
+  });
+
+  it('renders an original word as an all-green row', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 16,
+      longestWord: 'fine',
+      totalTimeMs: 30000,
+      history: [{ word: 'fine', parents: [] }],
+    });
+    expect(text).toContain(GREEN.repeat(4));
+    const yellowCount = (text.match(new RegExp(YELLOW, 'gu')) || []).length;
+    expect(yellowCount).toBe(0);
+  });
+
+  it('renders a single-parent steal with carried letters as yellow', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 52,
+      longestWord: 'refine',
+      totalTimeMs: 60000,
+      history: [
+        { word: 'fine', parents: [] },
+        { word: 'refine', parents: ['fine'] },
+      ],
+    });
+    expect(text).toContain(YELLOW.repeat(4) + GREEN.repeat(2));
+  });
+
+  it('renders one row per history entry for a long chain', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 116,
+      longestWord: 'redefine',
+      totalTimeMs: 120000,
+      history: [
+        { word: 'fine', parents: [] },
+        { word: 'refine', parents: ['fine'] },
+        { word: 'redefine', parents: ['refine'] },
+      ],
+    });
+    const rowRe = new RegExp(`[${GREEN}${YELLOW}]+`, 'gu');
+    const rows = text.match(rowRe) || [];
+    expect(rows.length).toBe(3);
+    expect(rows[0]).toBe(GREEN.repeat(4));
+    expect(rows[1]).toBe(YELLOW.repeat(4) + GREEN.repeat(2));
+    expect(rows[2]).toBe(YELLOW.repeat(6) + GREEN.repeat(2));
+  });
+
+  it('renders a multi-parent steal as all yellow', () => {
+    const text = generateShareText({
+      mode: 'random',
+      score: 24,
+      longestWord: 'redo',
+      totalTimeMs: 45000,
+      history: [
+        { word: 're', parents: [] },
+        { word: 'do', parents: [] },
+        { word: 'redo', parents: ['re', 'do'] },
+      ],
+    });
+    expect(text).toContain(YELLOW.repeat(4));
+    const rowRe = new RegExp(`[${GREEN}${YELLOW}]+`, 'gu');
+    const rows = text.match(rowRe) || [];
+    const lastRow = rows[rows.length - 1];
+    expect(lastRow).toBe(YELLOW.repeat(4));
+    const greenInLast = (lastRow.match(new RegExp(GREEN, 'gu')) || []).length;
+    expect(greenInLast).toBe(0);
+  });
+
+  it('includes longest-word length and formatted time in the footer', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 116,
+      longestWord: 'redefine',
+      totalTimeMs: 5 * 60 * 1000,
+      history: [{ word: 'redefine', parents: [] }],
+    });
+    expect(text).toMatch(/Longest\s*8\b/);
+    expect(text).toMatch(/Time\s*5:00\b/);
+  });
+});
