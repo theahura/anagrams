@@ -774,6 +774,129 @@ must add at least one tile from the pool.
 - `npm run dev` — boots; the new feedback message is wired through
   `reasonText` and renders in the live region as before.
 
+### `feat/initial-game` — Per-day share-text replay (this commit)
+
+Closes the open follow-up "Share-text replay from a past day on the
+calendar popover." Played-day cells in the home-screen calendar
+popover now expose a Share button that copies the full Wordle-style
+emoji grid for that past run. Old records (written before this commit
+existed, no `history` field) continue to load and just don't show the
+button — no degraded mode.
+
+#### What changed
+- `src/storage.js` — `recordDailyResult({ ..., history })` now
+  persists `history` inside the record when provided. No
+  `SCHEMA_VERSION` bump: the change is purely additive-optional, so
+  legacy v1 records continue to load (their popover just won't show
+  the Share button).
+- `src/components/App.vue` — `endGameWithResult` forwards
+  `history: result.history` into `recordDailyResult` so future daily
+  records carry their transformation chain.
+- `src/components/HomeScreen.vue` —
+  - Imports `generateShareText` from `../share.js`.
+  - Adds `copiedDay` ref + `copiedTimer` (transient share-button
+    feedback) and `canShareSelected` computed (gated on
+    `Array.isArray(selectedEntry.record.history) && length > 0`).
+  - New `async shareSelectedDay()` mirrors `ScoreScreen.onShare`:
+    builds share text via `generateShareText({ mode: 'daily', date,
+    score, longestWord, totalTimeMs: durationMs, history,
+    streak: 0 })`, awaits `navigator.clipboard.writeText`, flips
+    `copiedDay = true` for 2 s on success, falls back to
+    `window.prompt('Copy your result:', text)` on rejection.
+  - `closePopover` now also resets `copiedDay = false` and clears any
+    pending `setTimeout`, so reopening always starts in the
+    un-copied state.
+  - Template: `<button class="action-btn day-popover-share">` rendered
+    inside the popover panel only when `canShareSelected` is true.
+- `style.css` — new `.day-popover-share` rule: `margin-top: 12px`,
+  full width, slightly tighter padding/font than the default
+  `.action-btn`.
+
+#### What did NOT change
+- No `SCHEMA_VERSION` bump (per CLAUDE.md YAGNI; additive-optional
+  fields don't justify migration plumbing — the next genuinely
+  breaking change will introduce one).
+- No new dependency.
+- No domain-module signature changes (`generateShareText` already
+  accepted `history` and `streak`).
+- No retroactive streak calculation: past-day shares always pass
+  `streak: 0`, so the share footer never carries `Streak <N>`.
+  Streak is a "right now" concept; reconstructing it as it stood on a
+  past date would require walking records back from each share-target
+  date — deliberately out of scope.
+- No shared clipboard composable. The `shareSelectedDay()` shape
+  duplicates `ScoreScreen.onShare`; a single duplicate isn't
+  premature abstraction.
+
+#### Tests added
+- `tests/storage.test.js` — 2 new tests under
+  `recordDailyResult — history field`:
+  - "persists a history array round-trip when provided" — write
+    record with `history: [{word, parents}, …]`, read back via
+    `loadStore`, assert equality.
+  - "loads a v1 record without a history field and returns history
+    as undefined" — pre-seed `localStorage` with a legacy v1 shape
+    (no `history` key); assert `loadStore` returns the record with
+    `record.history === undefined`.
+- `tests/homeScreen.test.js` — 6 new tests under
+  `HomeScreen day-detail popover — share`:
+  - Share button rendered when `record.history` is non-empty.
+  - Share button NOT rendered when `record.history` is absent.
+  - Share button NOT rendered when `record.history` is `[]`.
+  - Clicking Share calls `navigator.clipboard.writeText` once with
+    text containing the entry's date AND score AND at least one
+    Wordle-grid emoji (`🟩` or `🟨`).
+  - Switching to a different played cell after copying resets the
+    button label from "Copied!" back to "Share" (race-leak
+    regression).
+  - Falls back to `window.prompt` (with text containing the score)
+    when `clipboard.writeText` rejects.
+  - Clipboard mock installed per-test via `Object.defineProperty(
+    navigator, 'clipboard', { value: { writeText: vi.fn() },
+    configurable: true, writable: true })`. Per-test
+    `vi.restoreAllMocks()` plus a defensive cleanup that removes
+    any `[role="dialog"]` left attached to `document.body` (Teleport
+    artifacts can otherwise leak across tests). Pattern documented
+    in RESEARCH-NOTES.md under v11.
+
+#### Race-condition guard
+`shareSelectedDay` captures `selectedIndex.value` as `startedFor`
+*before* awaiting `navigator.clipboard.writeText`. After the await
+(success or reject), if `selectedIndex.value !== startedFor`, the
+handler returns early without setting `copiedDay = true` or invoking
+`window.prompt`. Without this guard, a clipboard write that resolved
+*after* the user closed the popover (or switched cells) would (a)
+flash "Copied!" on the next opened popover that the user never
+shared, and (b) leak a stale `setTimeout(2000)` that would silently
+flip the next session's button label mid-view. `onCellClick` also
+proactively resets `copiedDay` on cell-to-cell switch (which doesn't
+go through `closePopover`), so the watcher's open-branch
+side-effects (focus management, listener registration) are
+unaffected.
+
+#### Documentation
+- `src/docs.md` — Persistence-layer bullet now documents the optional
+  `history` field on the persisted record shape; Recent-days bullet
+  notes `history` flows through `recentDays` and powers the new
+  per-day Share button. The "Schema versioning is strict-equal"
+  Things-to-Know entry now distinguishes breaking changes (require
+  bump) from additive-optional fields (do not).
+- `src/components/docs.md` — App.vue daily-recording bullet documents
+  the new `history` arg; HomeScreen popover bullet adds `copiedDay`
+  to the transient state list; new dedicated "popover Share button"
+  bullet covers the visibility gate, `streak: 0` rationale, the
+  intentional `ScoreScreen.onShare` parallel, and the
+  `copiedDay`-resets-on-close invariant.
+
+#### Verified
+- `npm test` — 176/176 passing (was 168; +2 storage + 6 homeScreen).
+- `npm run build` — production bundle builds cleanly in 0.6 s. CSS
+  now 9.26 kB (was 9.18 kB; +0.08 kB for the `.day-popover-share`
+  rule); JS at 101.79 kB raw / 39.24 kB gzipped (was 100.98 kB /
+  39.03 kB; +0.8 kB for the new computed/handler/template).
+- `npm run dev` — boots; HomeScreen popover now renders the Share
+  button on played cells whose record has a non-empty `history`.
+
 ## Open follow-ups (next commits)
 
 - Sticky-claim or staged-array model so click-to-remove on duplicate
@@ -786,10 +909,6 @@ must add at least one tile from the pool.
 - Score-tier color heatmap on calendar cells (currently boolean
   filled/hollow). Add only if play-tester feedback says scores are hard
   to interpret at a glance.
-- Share-text replay from a past day on the calendar popover.
-  `history` (transformation chain) is not currently in storage —
-  would require a schema migration to surface a full Wordle-style
-  share grid for past days.
 - Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
 - A11y polish round 2: keyboard activation tests in a real browser
   (Playwright) instead of happy-dom; live-region announcements verified

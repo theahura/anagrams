@@ -1190,3 +1190,123 @@ word." Single reason keeps the failure-priority table intact.
 - Schema / storage changes — the bug is purely in submit-time rule
   evaluation.
 - Domain-module signature changes — `canFormWord` shape unchanged.
+
+## Per-day share-text replay (v11 commit)
+
+Open follow-up from CURRENT-PROGRESS.md: "Share-text replay from a past
+day on the calendar popover. `history` (transformation chain) is not
+currently in storage — would require a schema migration to surface a
+full Wordle-style share grid for past days."
+
+Today the calendar popover shows score / longest word / duration but no
+Share button. The reason is structural: `recordDailyResult` persists
+`{ score, longestWord, durationMs, completedAt }` but not `history`, so
+`generateShareText` (which renders the Wordle-style emoji grid from
+`history[i].word.length` and `history[i].parents[i].length`) cannot be
+called for a past day.
+
+### Findings (knowledge-researcher summary)
+
+- **Schema migration**: 2024-2026 consensus across Zustand persist,
+  pinia-plugin-persistedstate, Redux Persist is "bump version + write a
+  migrate function (chain by `for v from persisted to LATEST`), even
+  for additive changes." Storage *key* stays the same; the inner
+  `schemaVersion` is the source of truth. Migration fires on read at
+  boot. Sources: [Zustand persist
+  reference](https://zustand.docs.pmnd.rs/reference/middlewares/persist),
+  [diballesteros migration
+  guide](https://dev.to/diballesteros/how-to-migrate-zustand-local-storage-store-to-a-new-version-njp),
+  [Zustand discussion #2082](https://github.com/pmndrs/zustand/discussions/2082).
+- **YAGNI counter**: when the change is purely additive-optional
+  (`history?: [{word, parents}]`), keeping `schemaVersion: 1` and
+  treating the new field as optional is fully correct: existing v1
+  records continue to load (no version mismatch), new records get
+  `history` when available, share button is gated on its presence
+  per-record. The migration framework can be added when the *first*
+  non-additive change actually demands it. CLAUDE.md says YAGNI
+  strongly; we honour that.
+- **Decision**: do NOT bump SCHEMA_VERSION. Treat `history` as an
+  optional field per record. Update `src/docs.md` to reflect that
+  `history` is now part of the record contract (optional). Document
+  the YAGNI rationale here for the next person who wonders why we
+  didn't bump.
+- **Clipboard testing in Vitest + happy-dom 20**: happy-dom has a real
+  `navigator.clipboard` but [issues
+  exist](https://github.com/capricorn86/happy-dom/issues/1153) around
+  blob types and `writeText`. Consensus: mock it. Cleanest pattern is
+  `Object.defineProperty(navigator, 'clipboard', { value: { writeText:
+  vi.fn().mockResolvedValue(undefined) }, configurable: true,
+  writable: true })` in a per-test `beforeEach`, then `vi.spyOn` per
+  assertion. `vi.stubGlobal` works for top-level globals but not for
+  nested properties like `navigator.clipboard`. Source: [Dheeraj
+  Murali — Clipboard Testing in
+  Vitest](https://dheerajmurali.com/blog/clipboard-testing/),
+  [andrewchaa](https://dev.to/andrewchaa/mocking-navigatorclipboardwritetext-in-jest-3hih).
+- **Promise gotcha**: `await wrapper.find('button').trigger('click')`
+  only awaits the next tick, not the clipboard promise. Pattern:
+  `await trigger('click'); await flushPromises(); expect(spy)…`.
+
+### Decisions
+
+1. **`recordDailyResult` accepts an optional `history` field** and
+   persists it inside the record. No schema bump, no migration code.
+   Existing v1 records continue to load (they just won't have a
+   `history` field on their record). The persisted shape becomes
+   `{ score, longestWord, durationMs, completedAt, history? }`. Old
+   callers (none external) and passing-`history`-undefined remain
+   safe.
+2. **App.vue threads `result.history` into the call** when recording a
+   finished daily run. `endGameWithResult` already has `result` from
+   `endGame`; that result already exposes `history` (added in the v3
+   share-grid commit so `ScoreScreen` could pass it to
+   `generateShareText`). Trivial wiring.
+3. **HomeScreen popover gains a Share button**, gated on
+   `selectedEntry.record?.history?.length > 0`. Records without
+   `history` (legacy v1 entries written before this commit) will not
+   show the button at all — there is no degraded mode. The button is
+   labelled "Share" with a "Copied!" flash on success, mirroring
+   `ScoreScreen`. `streak: 0` is passed (we do not retroactively
+   compute the streak as it stood on a past date — out of scope; would
+   require walking records back from each date).
+4. **Same clipboard-with-prompt-fallback** pattern as `ScoreScreen`.
+   Both implementations share a 1-line try/catch shape. No new
+   composable abstraction (YAGNI; one extraction-worthy duplicate at
+   most).
+5. **No `tests/setup.js` global file**. The clipboard mock is per-test
+   in `beforeEach` — avoids global side effects on tests that don't
+   touch clipboard. Pattern documented above.
+6. **Streak in past-day share is 0** (no `Streak <N>` suffix on past
+   shares). Reasonable: streak is a "right now" concept; a Wordle-
+   style share of "I beat April 22" with today's streak attached
+   would be misleading.
+
+### Tests
+
+- `tests/storage.test.js`: 2 new tests under `recordDailyResult` —
+  persists `history` round-trip when provided; record without
+  `history` field remains valid (forward compat for v1 records read
+  by the new loader).
+- `tests/homeScreen.test.js`: 6 new tests under day-detail popover:
+  (a) Share button rendered when `selectedEntry.record.history` is
+  non-empty; (b) Share button NOT rendered when `history` is absent;
+  (c) Share button NOT rendered when `history` is `[]`; (d) clicking
+  Share calls `navigator.clipboard.writeText` with text containing
+  the date and score; (e) the share button label resets to "Share"
+  when the user switches to a different cell after copying (race
+  guard); (f) when `clipboard.writeText` rejects, falls back to
+  `window.prompt`.
+- `tests/app.smoke.test.js` extension is NOT needed — the popover
+  share button is well covered at the component level. Smoke is
+  coarse.
+
+### Out of scope (intentional)
+
+- SCHEMA_VERSION bump and migration framework. Add when first
+  non-additive change demands it.
+- Retroactive streak calculation per past date.
+- Share-from-popover for random-mode runs (random doesn't persist to
+  storage at all).
+- A shared clipboard composable. One duplicate is not premature
+  abstraction.
+- Re-rendering the share grid in the popover preview (just copies
+  text). Future cosmetic.

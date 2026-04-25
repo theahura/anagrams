@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mount, flushPromises } from '@vue/test-utils';
 import HomeScreen from '../src/components/HomeScreen.vue';
 
 function buildRecent({ playedDates = [], todayDate = '2026-04-25', count = 7 }) {
@@ -298,6 +298,246 @@ describe('HomeScreen day-detail popover', () => {
     const dialogText = document.querySelector('[role="dialog"]').textContent;
     expect(dialogText).toContain('banana');
     expect(dialogText).not.toContain('apple');
+    wrapper.unmount();
+  });
+});
+
+describe('HomeScreen day-detail popover — share', () => {
+  function buildRecentWithHistory({
+    date,
+    score,
+    longestWord,
+    durationMs,
+    history,
+    todayDate = '2026-04-25',
+  }) {
+    const out = [];
+    const [y, m, d] = todayDate.split('-').map(Number);
+    const todayMs = Date.UTC(y, m - 1, d);
+    for (let i = 6; i >= 0; i--) {
+      const t = todayMs - i * 86400000;
+      const dateStr = new Date(t).toISOString().slice(0, 10);
+      const played = dateStr === date;
+      const entry = { date: dateStr, played };
+      if (played) {
+        entry.record = { score, longestWord, durationMs };
+        if (history !== undefined) entry.record.history = history;
+      }
+      out.push(entry);
+    }
+    return out;
+  }
+
+  function installClipboardMock(writeTextImpl) {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextImpl },
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.querySelectorAll('[role="dialog"]').forEach((n) => n.remove());
+  });
+
+  it('renders a Share button when the selected entry has a non-empty history', async () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 52,
+          longestWord: 'refine',
+          durationMs: 60000,
+          history: [
+            { word: 'fine', parents: [] },
+            { word: 'refine', parents: ['fine'] },
+          ],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const shareBtn = buttons.find((b) => b.textContent.trim() === 'Share');
+    expect(shareBtn).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('does not render a Share button when the selected entry has no history field', async () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 100,
+          longestWord: 'word',
+          durationMs: 60000,
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const shareBtn = buttons.find((b) => b.textContent.trim() === 'Share');
+    expect(shareBtn).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('does not render a Share button when history is an empty array', async () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 30,
+          longestWord: 'foo',
+          durationMs: 60000,
+          history: [],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const shareBtn = buttons.find((b) => b.textContent.trim() === 'Share');
+    expect(shareBtn).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('clicking Share copies a Wordle-style share grid containing the date and score', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    installClipboardMock(writeText);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 52,
+          longestWord: 'refine',
+          durationMs: 60000,
+          history: [
+            { word: 'fine', parents: [] },
+            { word: 'refine', parents: ['fine'] },
+          ],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const shareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'Share'
+    );
+    shareBtn.click();
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const text = writeText.mock.calls[0][0];
+    expect(text).toContain('2026-04-22');
+    expect(text).toContain('52');
+    expect(text).toMatch(/[\u{1F7E9}\u{1F7E8}]/u);
+    wrapper.unmount();
+  });
+
+  it('resets the share button label when the user switches to a different cell after copying', async () => {
+    installClipboardMock(vi.fn().mockResolvedValue(undefined));
+
+    const recent = [];
+    const todayMs = Date.UTC(2026, 3, 25);
+    for (let i = 6; i >= 0; i--) {
+      const t = todayMs - i * 86400000;
+      const dateStr = new Date(t).toISOString().slice(0, 10);
+      const entry = { date: dateStr, played: false };
+      if (dateStr === '2026-04-22') {
+        entry.played = true;
+        entry.record = {
+          score: 50,
+          longestWord: 'apple',
+          durationMs: 120000,
+          history: [{ word: 'apple', parents: [] }],
+        };
+      }
+      if (dateStr === '2026-04-24') {
+        entry.played = true;
+        entry.record = {
+          score: 99,
+          longestWord: 'banana',
+          durationMs: 60000,
+          history: [{ word: 'banana', parents: [] }],
+        };
+      }
+      recent.push(entry);
+    }
+    const wrapper = mount(HomeScreen, {
+      props: { streak: 2, best: 99, completedToday: false, recent },
+      attachTo: document.body,
+    });
+    const cells = wrapper.findAll('.home-calendar-cell');
+    await cells[3].trigger('click');
+    let dialog = document.querySelector('[role="dialog"]');
+    let shareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'Share' || b.textContent.trim() === 'Copied!'
+    );
+    shareBtn.click();
+    await flushPromises();
+    expect(shareBtn.textContent.trim()).toBe('Copied!');
+
+    await cells[5].trigger('click');
+    dialog = document.querySelector('[role="dialog"]');
+    const switchedShareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'Share' || b.textContent.trim() === 'Copied!'
+    );
+    expect(switchedShareBtn.textContent.trim()).toBe('Share');
+    wrapper.unmount();
+  });
+
+  it('falls back to window.prompt when the clipboard write rejects', async () => {
+    installClipboardMock(vi.fn().mockRejectedValue(new Error('denied')));
+    const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => null);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 99,
+          longestWord: 'banana',
+          durationMs: 60000,
+          history: [{ word: 'banana', parents: [] }],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const shareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'Share'
+    );
+    shareBtn.click();
+    await flushPromises();
+
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    const promptText = promptSpy.mock.calls[0][1];
+    expect(promptText).toContain('99');
     wrapper.unmount();
   });
 });

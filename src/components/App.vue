@@ -81,6 +81,7 @@ function endGameWithResult(result) {
       score: result.score,
       longestWord: result.longestWord,
       durationMs: result.totalTimeMs,
+      history: result.history,
     });
     if (wasNewRecord && result.score > previousBest) {
       isNewBest.value = true;

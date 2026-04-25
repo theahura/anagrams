@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { generateShareText } from '../share.js';
 
 const props = defineProps({
   loading: { type: Boolean, default: false },
@@ -18,6 +19,8 @@ const selectedIndex = ref(null);
 const panelPos = ref({ top: 0, left: 0 });
 const cellRefs = ref([]);
 const panelRef = ref(null);
+const copiedDay = ref(false);
+let copiedTimer = null;
 
 function setCellRef(i) {
   return (el) => {
@@ -29,6 +32,38 @@ const selectedEntry = computed(() => {
   if (selectedIndex.value === null) return null;
   return props.recent[selectedIndex.value] ?? null;
 });
+
+const canShareSelected = computed(() => {
+  const h = selectedEntry.value?.record?.history;
+  return Array.isArray(h) && h.length > 0;
+});
+
+async function shareSelectedDay() {
+  const startedFor = selectedIndex.value;
+  const entry = selectedEntry.value;
+  if (!entry?.record) return;
+  const text = generateShareText({
+    mode: 'daily',
+    date: entry.date,
+    score: entry.record.score,
+    longestWord: entry.record.longestWord,
+    totalTimeMs: entry.record.durationMs,
+    history: entry.record.history,
+    streak: 0,
+  });
+  try {
+    await navigator.clipboard.writeText(text);
+    if (selectedIndex.value !== startedFor) return;
+    copiedDay.value = true;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => {
+      copiedDay.value = false;
+    }, 2000);
+  } catch {
+    if (selectedIndex.value !== startedFor) return;
+    window.prompt('Copy your result:', text);
+  }
+}
 
 function parseDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -79,12 +114,22 @@ let restoreFocusOnClose = true;
 
 function onCellClick(i, ev) {
   panelPos.value = computePosition(ev.currentTarget);
+  copiedDay.value = false;
+  if (copiedTimer) {
+    clearTimeout(copiedTimer);
+    copiedTimer = null;
+  }
   selectedIndex.value = i;
 }
 
 function closePopover({ restoreFocus = true } = {}) {
   restoreFocusOnClose = restoreFocus;
   selectedIndex.value = null;
+  copiedDay.value = false;
+  if (copiedTimer) {
+    clearTimeout(copiedTimer);
+    copiedTimer = null;
+  }
 }
 
 function onDocMousedown(ev) {
@@ -236,6 +281,12 @@ onBeforeUnmount(() => {
           <span class="day-popover-label">Time</span>
           <span class="day-popover-value">{{ formatDuration(selectedEntry.record?.durationMs) }}</span>
         </div>
+        <button
+          v-if="canShareSelected"
+          type="button"
+          class="action-btn day-popover-share"
+          @click="shareSelectedDay"
+        >{{ copiedDay ? 'Copied!' : 'Share' }}</button>
       </div>
     </Teleport>
 

@@ -198,6 +198,44 @@ describe('hasCompletedDate', () => {
   });
 });
 
+describe('recordDailyResult — history field', () => {
+  it('persists a history array round-trip when provided', () => {
+    const fake = makeFakeStorage();
+    const history = [
+      { word: 'fine', parents: [] },
+      { word: 'refine', parents: ['fine'] },
+    ];
+    recordDailyResult(fake, {
+      date: '2026-04-25',
+      score: 52,
+      longestWord: 'refine',
+      durationMs: 60000,
+      history,
+    });
+    const { records } = loadStore(fake);
+    expect(records['2026-04-25'].history).toEqual(history);
+  });
+
+  it('loads a v1 record without a history field and returns history as undefined', () => {
+    const fake = makeFakeStorage({
+      'anagrams:v1': JSON.stringify({
+        schemaVersion: 1,
+        records: {
+          '2026-04-25': {
+            score: 100,
+            longestWord: 'word',
+            durationMs: 60000,
+            completedAt: 12345,
+          },
+        },
+      }),
+    });
+    const { records } = loadStore(fake);
+    expect(records['2026-04-25']).toBeDefined();
+    expect(records['2026-04-25'].history).toBeUndefined();
+  });
+});
+
 describe('recentDays', () => {
   it('returns 7 unplayed entries when records is empty', () => {
     const out = recentDays({}, '2026-04-25');

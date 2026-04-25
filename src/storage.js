@@ -29,7 +29,7 @@ export function loadStore(storage) {
   return { schemaVersion: SCHEMA_VERSION, records: parsed.records };
 }
 
-export function recordDailyResult(storage, { date, score, longestWord, durationMs }) {
+export function recordDailyResult(storage, { date, score, longestWord, durationMs, history }) {
   const store = loadStore(storage);
   if (Object.prototype.hasOwnProperty.call(store.records, date)) {
     return { stored: store.records[date], wasNewRecord: false };
@@ -40,6 +40,7 @@ export function recordDailyResult(storage, { date, score, longestWord, durationM
     durationMs,
     completedAt: Date.now(),
   };
+  if (history !== undefined) entry.history = history;
   const next = {
     schemaVersion: SCHEMA_VERSION,
     records: { ...store.records, [date]: entry },

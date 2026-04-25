@@ -553,6 +553,13 @@ button.home-calendar-cell:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.day-popover-share {
+  margin-top: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
 .rules {
   text-align: left;
   margin-top: 36px;
