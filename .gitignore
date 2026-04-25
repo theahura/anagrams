@@ -4,3 +4,4 @@ node_modules/
 data/web-cache.json
 .claude
 .codex
+dist/
