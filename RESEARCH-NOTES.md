@@ -123,3 +123,52 @@ when easy words exist on the board is penalized.
 - Per-round time limit: none; player may take as long as they want. Total
   time tracked for the score screen.
 - Share text format mirrors reword's compact style.
+
+## Click-to-stage UX (v2 commit)
+
+Researched click-to-stage interaction patterns for tile-based word games and
+Vue 3 input-mutation idioms. Key findings:
+
+- Production word games (Wordscapes, Anagram Magic Tour, snatch-it) lean on
+  pure tap-to-stage. For a desktop-first Snatch clone, hybrid (typing + click
+  shortcuts) is reasonable: mouse users get tactile clicks, fast typers keep
+  the keyboard. Submission via Enter or Submit either way.
+- For "stealing" a word: a single click on the entire word group should
+  append all that word's letters at once. This matches snatch-it precedent
+  and the spec's "use all letters of the consumed word" rule.
+- Visual highlight rule of thumb: highlight a word group as `consumed` only
+  when the typed input fully covers all of that word's letters (a legal
+  steal). Partial highlight on word groups misleads. For loose tiles, claim
+  leftmost-first per letter; partial highlighting on individual loose tiles
+  is fine.
+- Vue 3 input pitfalls: `v-model` on `<input>` + `typed.value += letter`
+  works directly. `v-model.trim` has known cursor-jump issues with
+  programmatic mutation — avoid. Use `@mousedown.prevent` on tile click
+  handlers to prevent the input from blurring; this is the cleanest idiom
+  and avoids a re-focus dance.
+- Multiset / frequency-vector subtraction is canonical for "is this word
+  claimable from rack + word groups." We already use this in
+  `anagramRules.canFormWord` (full powerset enumeration). For visual
+  highlighting (no dictionary/profanity/inflection checks needed), a greedy
+  pass — try each existing word as a steal candidate, then claim leftmost
+  loose tiles for the residue — is simpler and good enough since it is
+  purely a UI hint, not validation.
+
+Sources of truth diverge:
+- `canFormWord` stays the authoritative submission validator.
+- A new module `src/staging.js` provides `highlightConsumption(typed, pool)`
+  for visual feedback only. Greedy, no dictionary check.
+
+### Implementation summary
+
+- New module `src/staging.js` exposing `highlightConsumption(typed, pool)`
+  that returns `{ words: Set<idx>, loose: Set<idx> }` describing which
+  sources are highlighted by the current input.
+- `GameScreen.vue` adds click handlers on each face-up tile (`@mousedown.prevent`
+  appends letter to typed input) and on each existing word row (appends the
+  whole word). Computed `consumption` reactively computes highlight indices.
+- CSS: `.tile.clickable` cursor + hover; `.tile.used` already exists for
+  the highlight color; new `.word-row.consumed` class for whole-word steal
+  hint.
+- All existing submit logic stays the same — typed input remains the
+  source of truth for `submitWord`.

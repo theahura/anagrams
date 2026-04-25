@@ -35,6 +35,20 @@ describe('App smoke', () => {
     expect(tiles.length).toBe(3);
   });
 
+  it('appends a letter to the input when a face-up tile is clicked', async () => {
+    const wrapper = mount(App);
+    await wrapper.findAll('button').find((b) => b.text().includes('Daily')).trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    const tiles = wrapper.findAll('.tile-rack .tile');
+    expect(tiles.length).toBe(3);
+    await tiles[0].trigger('mousedown');
+
+    const input = wrapper.find('input.text-input');
+    expect(input.element.value.length).toBe(1);
+  });
+
   it('rejects an unknown word with feedback', async () => {
     const wrapper = mount(App);
     await wrapper.findAll('button').find((b) => b.text().includes('Daily')).trigger('click');

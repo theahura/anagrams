@@ -60,12 +60,57 @@ Brand-new repository scaffolding plus a complete, playable Anagrams MVP.
 - Smoke test now asserts on the feedback message text, not just its
   presence.
 
+### `feat/initial-game` — Click-to-stage tile interaction (this commit)
+
+Adds a hybrid input model: clicks on face-up tiles or on existing word rows
+append letters to the typed input as a fast shortcut. Live multiset
+highlighting shows which tiles and word groups are claimed by the current
+input.
+
+#### New / changed
+- `src/staging.js` (new) — `highlightConsumption(typed, pool)` returns
+  `{ words: Set<idx>, loose: Set<idx> }`. Greedy multiset matching: claim
+  each existing word in order if it fits, then leftmost-first per letter
+  for residual loose tiles. No dictionary / profanity check — purely a UI
+  hint. `canFormWord` remains the source of truth at submit time.
+- `src/components/GameScreen.vue` — face-up tile spans and word rows are
+  now `clickable` with `@mousedown.prevent` handlers (`onTileClick`,
+  `onWordClick`). A `consumption` computed property feeds `used` (loose
+  tiles) and `consumed` (word rows) classes from
+  `highlightConsumption`.
+- `style.css` — `.tile.clickable` cursor + hover transform; `.word-row`
+  rounded background container, `.word-row.clickable` hover, and
+  `.word-row.consumed` accent (green tint + inset border).
+
+#### Tests added
+- `tests/staging.test.js` — 10 unit tests for `highlightConsumption`:
+  empty input, single match, leftmost-of-duplicates, multi-letter, full
+  word coverage, partial-coverage rejection, steal scenarios,
+  over-consumption skipping, unclaimable extras (still claim what fits),
+  case-insensitive.
+- `tests/gameScreenInteraction.test.js` — 6 component tests covering
+  click-to-append (tile + word), cumulative clicks, `used` class on
+  matched loose tiles, `consumed` class on fully-covered words,
+  no `consumed` on partial coverage.
+- `tests/app.smoke.test.js` — added a smoke test asserting tile-click
+  flows through the App boundary into the input box.
+
+#### Verified
+- `npm test` — 88/88 passing (10 staging + 6 gameScreenInteraction + 1
+  app smoke addition + 71 prior).
+- `npm run build` — production bundle builds (≈1.8 MB JS, identical to
+  prior commit; CSS now 5.78 kB up from 5.31 kB).
+- `npm run dev` — boots; HTML, vue components, dictionary asset all
+  served. Tiles and word rows respond to clicks.
+
 ## Open follow-ups (next commits)
 
 - Performance: bundled JS is 1.8MB (mostly `wink-lemmatizer`); consider
   lazy-loading or pre-computing trivial inflections offline.
 - A11y pass: keyboard navigation, focus rings, ARIA on tile rack.
-- Click-to-stage tile interaction as an alternative to typing.
 - Persistence (local-storage) for daily streak / past scores.
 - Stronger share text (Wordle-style emoji block summarising flow).
+- "Clear input" button to reset typed input quickly.
+- Click an already-`used` tile to remove the matching letter from input
+  (currently it just appends another copy).
 - noridoc initialization once folder structure stabilises.

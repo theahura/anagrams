@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { drawTile, submitWord, endGame } from '../game.js';
 import { finalScore } from '../scoring.js';
+import { highlightConsumption } from '../staging.js';
 
 const props = defineProps({
   initialGame: { type: Object, required: true },
@@ -26,6 +27,22 @@ const looseLetters = computed(() => game.value.pool.looseLetters);
 const playerWords = computed(() => game.value.pool.words);
 const faceDownCount = computed(() => game.value.pool.faceDown.length);
 const canDraw = computed(() => faceDownCount.value > 0);
+
+const consumption = computed(() =>
+  highlightConsumption(typed.value, game.value.pool)
+);
+
+function onTileClick(i) {
+  if (consumption.value.loose.has(i)) return;
+  typed.value += looseLetters.value[i];
+  clearFeedback();
+}
+
+function onWordClick(i) {
+  if (consumption.value.words.has(i)) return;
+  typed.value += playerWords.value[i].word;
+  clearFeedback();
+}
 
 function tick() {
   elapsedMs.value = Date.now() - game.value.startTime;
@@ -113,14 +130,24 @@ function formatTime(ms) {
 
     <div class="section-label">Face-up tiles · {{ faceDownCount }} face-down</div>
     <div class="tile-rack">
-      <span v-for="(letter, i) in looseLetters" :key="`l${i}`" class="tile offered">{{ letter }}</span>
+      <span
+        v-for="(letter, i) in looseLetters"
+        :key="`l${i}`"
+        :class="['tile', 'offered', 'clickable', { used: consumption.loose.has(i) }]"
+        @mousedown.left.prevent="onTileClick(i)"
+      >{{ letter }}</span>
       <span v-if="looseLetters.length === 0" class="empty-note">No tiles yet — draw to start.</span>
     </div>
 
     <div class="section-label">Your words</div>
     <div class="words-list">
       <div v-if="playerWords.length === 0" class="empty-note">No words yet.</div>
-      <div v-for="(w, i) in playerWords" :key="`w${i}`" class="word-row">
+      <div
+        v-for="(w, i) in playerWords"
+        :key="`w${i}`"
+        :class="['word-row', 'clickable', { consumed: consumption.words.has(i) }]"
+        @mousedown.left.prevent="onWordClick(i)"
+      >
         <span v-for="(ch, j) in w.word.split('')" :key="`c${j}`" class="tile">{{ ch }}</span>
       </div>
     </div>
