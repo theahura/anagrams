@@ -447,6 +447,82 @@ labels, and live regions announce submit results.
   screen-reader interaction not driven from CLI; tested at the
   component-DOM level by the test suite.
 
+### `feat/initial-game` — 7-day calendar grid on home screen (this commit)
+
+Surfaces the existing Daily Challenge persistence layer visually as a
+horizontal 7-cell strip on the home screen. Cells run oldest-first
+left-to-right, ending at today; filled cells = days played, hollow
+cells = days missed, an accent outline ring marks today regardless of
+played/unplayed state. Matches the de-facto pattern used by
+Wordle/Duolingo/GitHub heatmaps. No domain-module changes; no storage
+schema change.
+
+#### New / changed
+- `src/storage.js` — new exported pure helper
+  `recentDays(records, todayDate, count = 7)` returning an oldest-first
+  array of `{ date, played, record? }` entries ending at `todayDate`.
+  Reuses the existing internal `shiftDate` UTC arithmetic. `record`
+  (full underlying entry) is attached only when `played` is true,
+  leaving the shape forward-compatible with future per-cell features.
+- `src/components/HomeScreen.vue` — new optional `recent` prop
+  (`Array`, default `[]`). Renders a `.home-calendar` strip below the
+  existing `.home-stats` row when `(streak > 0 || best > 0) &&
+  recent.length > 0`. Wrapped in `<div role="group" aria-label="Last
+  7 days activity">`. Each cell is a presentational `<div
+  class="home-calendar-cell">` (intentionally non-interactive — no
+  focus, no click) carrying `.played` when the entry is played and
+  `.today` on the rightmost cell. Per-cell `aria-label` and `title`
+  follow GitHub's pattern: `Today, score N, Friday April 25`,
+  `Today, not played yet, Friday April 25`, `Score N, Tuesday April
+  22`, or `Not played, Monday April 21`. Day-letter labels above
+  each cell come from `['S','M','T','W','T','F','S']` indexed by UTC
+  weekday. Helpers `weekdayLetter`, `humanDate`, `cellLabel` all
+  parse the date string via `Date.UTC` to keep weekday computation
+  aligned with the storage-key UTC convention.
+- `src/components/App.vue` — `computeStats()` now also derives
+  `recent: recentDays(records, today, 7)`. Stats shape grew from
+  `{ streak, best, completedToday }` to
+  `{ streak, best, completedToday, recent }`. The `<HomeScreen … />`
+  template line gained `:recent="stats.recent"`. Recompute timing is
+  unchanged — same transitions (`returnHome`,
+  `endGameWithResult`) refresh the calendar.
+- `style.css` — new rules: `.home-calendar` (flex row, `gap: 6px`,
+  `margin-top: 14px`, centered), `.home-calendar-day` (column flex),
+  `.home-calendar-letter` (10 px gray uppercase, 1 px letter-spacing,
+  color `#565758`), `.home-calendar-cell` (28×28 px, 2 px border
+  `#3a3a3c`, 4 px radius, transparent fill), `.home-calendar-cell.played`
+  (fill `#538d4e`, mirrors `.tile.used`), `.home-calendar-cell.today`
+  (`outline: 2 px solid #b59f3b; outline-offset: 2 px` — same accent
+  yellow used by `:focus-visible`). Mobile breakpoint
+  (`@media (max-width: 480px)`) shrinks cells to 24×24 px.
+
+#### Tests added
+- `tests/storage.test.js` — 6 new `recentDays` unit tests: empty
+  records returns 7 unplayed entries with the right oldest/newest
+  dates; today-only attaches the record; mixed history marks the
+  right indices; explicit `count` argument honored; month boundary;
+  year boundary.
+- `tests/homeScreen.test.js` (new file) — 6 component tests with
+  Vue Test Utils + happy-dom: no calendar when `streak===0 &&
+  best===0`; exactly 7 cells when history exists; only the rightmost
+  cell carries `.today`; only `played: true` entries get `.played`;
+  every cell has a non-empty `aria-label` whose content reflects
+  today/played/unplayed state; the `.home-calendar` wrapper has
+  `role="group"` and a non-empty `aria-label`.
+- `tests/app.smoke.test.js` — extended the existing
+  seeded-localStorage test to also assert `.home-calendar` exists
+  and the rightmost `.home-calendar-cell` carries both `.today` and
+  `.played` (today was seeded).
+
+#### Verified
+- `npm test` — 151/151 passing (was 139; +12 new + 1 extension).
+- `npm run build` — production bundle builds cleanly in 0.6 s.
+  CSS now 7.57 kB (was 6.97 kB; +0.6 kB for the new rules); JS
+  unchanged at ≈95 kB raw / 36.9 kB gzipped.
+- `npm run dev` — boots; serves the new `.home-calendar` markup and
+  rules. Verified via the test suite at component-DOM level; full
+  end-to-end manual click-through not run from CLI.
+
 ## Open follow-ups (next commits)
 
 - Sticky-claim or staged-array model so click-to-remove on duplicate
@@ -456,7 +532,12 @@ labels, and live regions announce submit results.
 - Local-midnight reset for the Daily Challenge (industry consensus over
   UTC). Currently UTC for parity with the existing puzzle seed; if we
   move puzzle ID to local, the streak storage key follows automatically.
-- Past-scores list / 7-day calendar grid on the home screen.
+- Score-tier color heatmap on calendar cells (currently boolean
+  filled/hollow). Add only if play-tester feedback says scores are hard
+  to interpret at a glance.
+- Click-a-calendar-cell to open a per-day detail popup (longest word,
+  duration, share-text replay). Currently cells are non-interactive —
+  tooltip + screen-reader label is the only disclosure.
 - Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
 - `prefers-reduced-motion` honouring on the tile pop-in animation.
 - A11y polish round 2: keyboard activation tests in a real browser

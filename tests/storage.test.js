@@ -5,6 +5,7 @@ import {
   currentStreak,
   bestScore,
   hasCompletedDate,
+  recentDays,
 } from '../src/storage.js';
 
 function makeFakeStorage(initial = {}) {
@@ -195,4 +196,62 @@ describe('hasCompletedDate', () => {
     const records = { '2026-04-25': { score: 10 } };
     expect(hasCompletedDate(records, '2026-04-25')).toBe(true);
   });
+});
+
+describe('recentDays', () => {
+  it('returns 7 unplayed entries when records is empty', () => {
+    const out = recentDays({}, '2026-04-25');
+    expect(out).toHaveLength(7);
+    for (const entry of out) {
+      expect(entry.played).toBe(false);
+    }
+    expect(out[6].date).toBe('2026-04-25');
+    expect(out[0].date).toBe('2026-04-19');
+  });
+
+  it('marks today as played and attaches the record when only today is recorded', () => {
+    const records = {
+      '2026-04-25': { score: 142, longestWord: 'redefine', durationMs: 300000 },
+    };
+    const out = recentDays(records, '2026-04-25');
+    expect(out[6].played).toBe(true);
+    expect(out[6].record).toEqual(records['2026-04-25']);
+    for (let i = 0; i < 6; i++) {
+      expect(out[i].played).toBe(false);
+    }
+  });
+
+  it('marks the right indices as played for a mixed history', () => {
+    const records = {
+      '2026-04-22': { score: 100 },
+      '2026-04-24': { score: 50 },
+    };
+    const out = recentDays(records, '2026-04-25');
+    expect(out[3].date).toBe('2026-04-22');
+    expect(out[3].played).toBe(true);
+    expect(out[5].date).toBe('2026-04-24');
+    expect(out[5].played).toBe(true);
+    expect(out[0].played).toBe(false);
+    expect(out[1].played).toBe(false);
+    expect(out[2].played).toBe(false);
+    expect(out[4].played).toBe(false);
+    expect(out[6].played).toBe(false);
+  });
+
+  it('crosses month boundaries correctly', () => {
+    const records = {
+      '2026-04-30': { score: 10 },
+      '2026-05-01': { score: 20 },
+    };
+    const out = recentDays(records, '2026-05-02');
+    const datesInOrder = out.map((e) => e.date);
+    expect(datesInOrder).toEqual([
+      '2026-04-26', '2026-04-27', '2026-04-28', '2026-04-29',
+      '2026-04-30', '2026-05-01', '2026-05-02',
+    ]);
+    expect(out[4].played).toBe(true);
+    expect(out[5].played).toBe(true);
+    expect(out[6].played).toBe(false);
+  });
+
 });

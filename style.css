@@ -417,6 +417,45 @@ button.word-row {
   color: #6aaa64;
 }
 
+.home-calendar {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.home-calendar-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.home-calendar-letter {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #565758;
+}
+
+.home-calendar-cell {
+  width: 28px;
+  height: 28px;
+  border: 2px solid #3a3a3c;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.home-calendar-cell.played {
+  background: #538d4e;
+  border-color: #538d4e;
+}
+
+.home-calendar-cell.today {
+  outline: 2px solid #b59f3b;
+  outline-offset: 2px;
+}
+
 .rules {
   text-align: left;
   margin-top: 36px;
@@ -567,5 +606,9 @@ button.word-row {
   }
   .mode-title {
     font-size: 16px;
+  }
+  .home-calendar-cell {
+    width: 24px;
+    height: 24px;
   }
 }

@@ -681,3 +681,149 @@ and AT sees opaque `<span>` elements with no role.
   dark.
 - Live focus management on Submit success / Draw button enable
   changes (not needed for the rack-keyboard primary fix).
+
+## 7-day calendar grid on home screen (v8 commit)
+
+Open follow-up: "Past-scores list / 7-day calendar grid on the home
+screen." The streak/best persistence layer (v5) already records
+per-date entries in `localStorage`. This commit surfaces that data
+visually as a 7-cell horizontal strip on the home screen so players
+see their recent activity at a glance, matching the de-facto pattern
+used by daily-puzzle games.
+
+### Findings (knowledge-researcher summary)
+
+- **Layout**: horizontal 7-cell strip is the dominant pattern across
+  Wordle clones, Duolingo's streak widget, GitHub's contribution
+  graph, etc. Most-recent day on the right (today). Day letter
+  (M/T/W/T/F/S/S) above each cell. Vertical or grid layouts only
+  appear on dedicated stats screens, not home surfaces.
+- **Cell state**: filled vs. hollow is sufficient for boolean
+  played/missed; multi-tier color heatmaps (GitHub/Apple style) add
+  signal but require defining score buckets. **YAGNI for this
+  commit** — start with boolean fill; add tiering later only if
+  player feedback says scores are hard to interpret.
+- **Today**: distinct outline/accent ring, plus the same fill state
+  the other days use (today played → filled-with-ring; today not
+  yet played → hollow-with-ring). Don't change the fill semantics
+  for "today" — readers should still parse played/unplayed at a
+  glance.
+- **Missed days**: hollow outline or low-opacity gray. **Avoid red**
+  — reads as "wrong" rather than "skipped".
+- **No score-in-cell text**: cells are 24-32 px on mobile, too
+  small for legible numbers. Use `title` (tooltip) and `aria-label`
+  (screen reader) to expose the score on demand.
+- **Mobile**: keep all 7 days; shrink cells to 24 px rather than
+  truncating count. 7×24 px + 6 gaps fits any 320 px viewport.
+- **A11y**: GitHub's contribution graph is the gold standard.
+  Wrap the strip in a labeled landmark (`role="group"
+  aria-label="Last 7 days activity"`). Each cell carries a
+  descriptive `aria-label` like `"Score 142, Tuesday April 22"`,
+  `"Not played, Monday April 21"`, or `"Today, score 142, Friday
+  April 25"`. The whole `<table>` row/column-header pattern is
+  overkill for a 7-cell strip.
+
+### Decisions
+
+1. **New pure helper in `src/storage.js`**: `recentDays(records,
+   todayDate, count = 7)`. Returns an array of `{ date, played,
+   record? }` entries, oldest first, ending at `todayDate`. Pure
+   over `records` and the date string — no storage access. Reuses
+   the existing `shiftDate` UTC arithmetic for date traversal.
+   `record` is the underlying entry (`{score, longestWord,
+   durationMs, completedAt}`) when `played === true`; absent
+   otherwise. Returning the raw record (rather than just `score`)
+   keeps the API forward-compatible with future cell features
+   (longest-word tooltip, time, etc.).
+
+2. **App.vue wiring**: extend `computeStats()` to also derive
+   `recent` (the 7-day window). Stats shape grows from `{ streak,
+   best, completedToday }` to `{ streak, best, completedToday,
+   recent }`. `recent` is recomputed on the same transitions
+   (`returnHome`, `endGameWithResult`) so a freshly-recorded daily
+   shows up immediately when navigating back.
+
+3. **HomeScreen.vue**: new `recent` prop (`Array`, default `[]`).
+   Renders a `.home-calendar` strip *below* the `.home-stats` row
+   (and gated by the same "any non-zero history" condition — i.e.,
+   render only when `streak > 0 || best > 0`). Each cell renders:
+   - Day-letter label above (`['S','M','T','W','T','F','S']`
+     keyed by UTC weekday).
+   - The cell itself: `<div>` (not a button — these aren't
+     interactive in v8; tooltip is enough). Has classes:
+     `.home-calendar-cell`, `.played` (when played), `.today`
+     (when matches today's date).
+   - `aria-label` matching the GitHub pattern: `"Today, score
+     {N}, {weekday} {month} {day}"`, `"Score {N}, {weekday}
+     {month} {day}"`, or `"Not played, {weekday} {month} {day}"`.
+   - `title` attribute (tooltip on hover) with the same text.
+
+4. **Styling** in `style.css`:
+   - `.home-calendar` — flex row, `gap: 6px`, `justify-content:
+     center`, `margin-top: 14px`. Each unit is a `<div
+     class="home-calendar-day">` containing the letter label
+     above the cell.
+   - `.home-calendar-letter` — small (10 px), `#565758`, uppercase,
+     letter-spacing 1 px.
+   - `.home-calendar-cell` — 28 px square, `border: 2px solid
+     #3a3a3c`, `border-radius: 4px`, transparent fill.
+   - `.home-calendar-cell.played` — fill `#538d4e`, border same.
+     Mirrors the existing `.tile.used` palette for consistency.
+   - `.home-calendar-cell.today` — `outline: 2px solid #b59f3b;
+     outline-offset: 2px`. Same accent yellow used elsewhere for
+     focus rings; visually distinct without changing fill.
+   - Mobile breakpoint (`@media (max-width: 480px)`): cells
+     shrink to 24 px.
+
+5. **No new dependency**. The whole feature is a pure helper plus
+   a presentational component slice. Date arithmetic reuses
+   `shiftDate` (already in `src/storage.js`). Weekday letter is
+   derived via `new Date(Date.UTC(...)).getUTCDay()`.
+
+6. **No interactive cell**. Each cell is a `<div>` with `title`
+   and `aria-label`. Clicking does nothing. (Future commit could
+   open a per-day detail popup; out of scope here.)
+
+7. **Empty / first-time players**: when `streak === 0 && best === 0`,
+   neither the stats row nor the calendar strip renders. Same
+   "clean for new players" gating as the existing stats row.
+
+### Tests
+
+- `tests/storage.test.js` (extend): new `describe('recentDays', …)`:
+  - returns an empty array of length `count` when records is empty
+    (each entry `{date, played: false}`)
+  - returns 7 entries by default, ending at `todayDate`, oldest
+    first
+  - marks played correctly for partial history (mix of played and
+    missed days)
+  - includes the underlying `record` object when played
+  - handles month and year boundaries correctly (analogous to the
+    existing `currentStreak` boundary test)
+  - respects an explicit `count` argument (e.g., `count: 14`
+    returns 14 entries)
+- `tests/homeScreen.test.js` (new — there isn't a HomeScreen unit
+  test file yet):
+  - renders the 7-day strip when `streak > 0` or `best > 0`
+  - does NOT render the strip when both are 0
+  - each cell receives an `aria-label` describing its state
+    (Today / played / not played)
+  - the rightmost cell has the `.today` class
+  - cells whose `recent[i].played` is true have the `.played`
+    class
+- `tests/app.smoke.test.js` (extend): the existing "shows Streak
+  and Best on the home screen when prior daily records exist" test
+  also asserts that the calendar strip is in the DOM and that the
+  rightmost cell has class `today`.
+
+### Out of scope (intentional)
+
+- Score-tier color heatmap on cells. YAGNI until we have data on
+  whether players want it.
+- Click-a-cell-to-see-details popup or score-row history list.
+  Tooltip + screen reader label is sufficient v8 disclosure.
+- Showing future days. The strip is strictly the 7 days ending at
+  today; the calendar metaphor is "recent activity," not "weekly
+  agenda."
+- Streak protection / freeze tokens, longest-word "best",
+  past-month grid view. All deferred.

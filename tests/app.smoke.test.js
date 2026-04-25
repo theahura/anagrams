@@ -98,6 +98,14 @@ describe('App smoke', () => {
     await flushPromises();
     expect(wrapper.text()).toMatch(/Streak\s*2(?!\d)/);
     expect(wrapper.text()).toMatch(/Best\s*247(?!\d)/);
+
+    const calendar = wrapper.find('.home-calendar');
+    expect(calendar.exists()).toBe(true);
+    const cells = wrapper.findAll('.home-calendar-cell');
+    expect(cells).toHaveLength(7);
+    const last = cells[cells.length - 1];
+    expect(last.classes()).toContain('today');
+    expect(last.classes()).toContain('played');
   });
 
   it('surfaces a dictError banner when the lemmas asset fails to load', async () => {

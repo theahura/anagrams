@@ -85,6 +85,18 @@ export function hasCompletedDate(records, date) {
   return Object.prototype.hasOwnProperty.call(records, date);
 }
 
+export function recentDays(records, todayDate, count = 7) {
+  const out = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const date = shiftDate(todayDate, -i);
+    const played = !!records && Object.prototype.hasOwnProperty.call(records, date);
+    const entry = { date, played };
+    if (played) entry.record = records[date];
+    out.push(entry);
+  }
+  return out;
+}
+
 export function browserStorage() {
   if (typeof window === 'undefined' || !('localStorage' in window)) {
     return noopStorage();

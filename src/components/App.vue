@@ -11,6 +11,7 @@ import {
   currentStreak,
   bestScore,
   hasCompletedDate,
+  recentDays,
   browserStorage,
 } from '../storage.js';
 
@@ -32,6 +33,7 @@ function computeStats() {
     streak: currentStreak(records, today),
     best: bestScore(records),
     completedToday: hasCompletedDate(records, today),
+    recent: recentDays(records, today, 7),
   };
 }
 
@@ -117,6 +119,7 @@ function todayUTC() {
       :streak="stats.streak"
       :best="stats.best"
       :completed-today="stats.completedToday"
+      :recent="stats.recent"
       @start="startGame"
     />
 
