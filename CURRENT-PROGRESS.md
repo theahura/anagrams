@@ -152,15 +152,68 @@ footer only, no emoji rows.
 - `npm test` — 96/96 passing (was 90; +6 new share tests).
 - No changes to game logic, scoring, or anagram rules.
 
+### `feat/initial-game` — Click-to-remove + Clear button (this commit)
+
+Makes the click-to-stage interaction reversible. Clicking a tile/word
+that is already claimed by the typed input now *removes* its letters.
+Adds a "Clear" button that resets the typed input in one action.
+
+#### New / changed
+- `src/components/GameScreen.vue`:
+  - `onTileClick(i)`: if `consumption.loose.has(i)`, remove the first
+    occurrence of that letter from `typed` (case-insensitive). Else
+    append (existing behavior).
+  - `onWordClick(i)`: if `consumption.words.has(i)`, remove the word's
+    letters from `typed` one-at-a-time, leftmost-first per letter. Else
+    append.
+  - New `onClear()` resets `typed` to `''` and clears feedback.
+  - Two inline pure-string helpers: `removeFirstOccurrence(s, ch)` and
+    `removeWordLetters(s, word)`.
+  - Template: new `<button type="button">Clear</button>` between the
+    input and Submit, disabled while `typed === ''`.
+- No CSS changes needed — existing `.action-btn` + `.action-btn:disabled`
+  styles cover the new button.
+- No domain-module changes (`staging.js`, `anagramRules.js`, `game.js`,
+  `scoring.js`, `pool.js`, etc. are untouched).
+
+#### Tests added
+- `tests/gameScreenInteraction.test.js`:
+  - "removes the letter from input when an already-claimed tile is
+    clicked" (replaces the previous "does not append" no-op test).
+  - "removes the entire word's letters from input when an
+    already-consumed word row is clicked" (typed='brook', word='rook'
+    → typed='b').
+  - "removes only the letters of the clicked word, leaving extras
+    intact" (typed='barook' with extras 'b','a' loose → typed='ba').
+  - "removes letters case-insensitively when input is uppercase".
+  - "renders a Clear button that resets typed input when clicked".
+  - "Clear button is disabled when typed input is empty".
+  - "Clear button is enabled when typed input is non-empty".
+- `tests/app.smoke.test.js`:
+  - "Clear button empties the typed input from the App boundary".
+
+#### Verified
+- `npm test` — 103/103 passing (was 96; +7 new + 1 replaced).
+- `npm run build` — production bundle builds, no size change.
+
+#### Known limitation (documented in RESEARCH-NOTES.md)
+- With duplicate letters, clicking the leftmost-of-letter claimed tile
+  causes the rightmost-of-letter to lose its highlight instead. This is
+  intrinsic to the multiset-claim model; fixing it requires switching
+  to an explicit staged-array model (out of scope for a polish commit).
+  Backspace and Clear both work as fallbacks.
+
 ## Open follow-ups (next commits)
 
 - Performance: bundled JS is 1.8MB (mostly `wink-lemmatizer`); consider
   lazy-loading or pre-computing trivial inflections offline.
-- A11y pass: keyboard navigation, focus rings, ARIA on tile rack.
+- A11y pass: keyboard navigation, focus rings, ARIA on tile rack;
+  switch click handlers from `@mousedown.left.prevent` to `@click`
+  (with `@mousedown.prevent` only for focus-suppression) so keyboard
+  activation works.
 - Persistence (local-storage) for daily streak / past scores.
-- "Clear input" button to reset typed input quickly.
-- Click an already-`used` tile to remove the matching letter from input
-  (currently it just appends another copy).
+- Sticky-claim or staged-array model so click-to-remove on duplicate
+  leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not
   hit by typical games but possible.
 - noridoc initialization once folder structure stabilises.

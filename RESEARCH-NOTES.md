@@ -228,3 +228,82 @@ API change: `generateShareText` gains a new `history` param
 (`{word, parents}[]`). `ScoreScreen.vue` passes `result.history` (added to
 `endGame` output, currently absent — `game.history` already exists, just
 need to surface it through `endGame`'s return).
+
+## Click-to-remove + Clear button (v4 commit)
+
+Open follow-up from CURRENT-PROGRESS.md: "Click an already-`used` tile to
+remove the matching letter from input (currently it just appends another
+copy)." (Note: actual current behavior is no-op, not double-append — the
+`onTileClick`/`onWordClick` handlers in `GameScreen.vue` early-return on
+`consumption.loose.has(i)` / `consumption.words.has(i)`. The follow-up
+itself stands: clicking a used tile should be reversible, not a no-op.)
+
+### Findings
+
+- **Production word games** (Words With Friends, Wordscapes) treat each
+  rack tile as an identity-bearing object: clicking a staged tile removes
+  *that tile's* contribution. Their staging model is an explicit array of
+  tile references, not a typed string. Adopting that model is a much
+  bigger refactor than a UX polish pass — out of scope for this commit.
+- **In our multiset-claim model** ("typed string is source of truth;
+  highlighting is computed by greedy multiset matching"), individual tile
+  identity is lost: removing one occurrence of letter L from typed always
+  causes the *rightmost-claimed* L tile to lose its highlight, regardless
+  of which L tile the user clicked. With duplicates of a letter, this
+  produces a minor visual artifact when the user clicks the leftmost
+  duplicate (their click becomes "click leftmost L tile, but rightmost L
+  tile un-highlights"). For non-duplicates the behavior is correct.
+- **Positional position-mapping does not fix this.** The artifact stems
+  from the recompute logic (greedy leftmost claim), not from the removal
+  algorithm. Mapping `tileIdx → typedPos` and removing exactly that
+  position produces an identical `typed` string to "remove first
+  occurrence of letter L." Verified with both algorithms on
+  `typed='OOA', loose=['o','x','o','a']`. Only a sticky-claim or explicit
+  staged-array model would produce identity-preserving removal.
+- **Decision**: ship the simple "click-used → remove first occurrence of
+  that letter" + "click-consumed → remove all letters of that word
+  (leftmost-first per letter)." Accept the duplicate-leftmost artifact
+  as a known minor limitation. Backspace + Clear + click-rightmost-first
+  all work around it.
+
+### A11y considerations
+
+- `@mousedown.prevent` blocks the input from blurring on click — keep as
+  a focus-suppression event handler. But put the actual toggle logic on
+  `@click` so keyboard activation (Enter / Space on a focused tile) also
+  fires it. The current code uses `@mousedown.left.prevent="onTileClick(i)"`
+  which fires only on pointer events; keyboard users currently can't
+  interact via clicks at all.
+- For this commit, scope is "make click reversible" — keyboard parity
+  belongs in the broader a11y pass already on the open-follow-ups list.
+  We will keep `@mousedown.left.prevent` as the trigger for symmetry with
+  the current implementation but flag the gap.
+
+### Clear button conventions
+
+- Visible "Clear" text button beats inline × icon on accessibility +
+  clarity grounds (Nielsen Norman, Scott O'Hara). Place adjacent to the
+  input. Keyboard-accessible by default (`<button type="button">`).
+- Disable when typed input is empty so the button has no surprise effect.
+
+### Implementation summary
+
+- `GameScreen.vue` rewrites `onTileClick` and `onWordClick`: if the
+  clicked tile/word is already in `consumption.{loose,words}`, remove
+  letters from typed (leftmost-first); else append (existing behavior).
+- New `onClear()` resets typed to `''` and clears feedback. Bound to a
+  new `<button class="action-btn" type="button">Clear</button>` next to
+  the Submit button. Disabled while `typed === ''`.
+- `removeFirstOccurrence(s, ch)` and `removeWordLetters(s, word)` are
+  small string helpers — keep inline in `GameScreen.vue` (no need for
+  a new module — they are not reused).
+- `style.css`: tweak the form layout if needed so Clear sits between the
+  input and Submit.
+- Tests:
+  - `tests/gameScreenInteraction.test.js`: rewrite the "does not append"
+    test to "removes the letter"; add tests for word-row remove, Clear
+    behavior, Clear disabled-when-empty.
+  - No changes to `staging.test.js`, `app.smoke.test.js` (smoke tests are
+    coarse — no need to repeat at the App boundary).
+- No changes to `staging.js`, `anagramRules.js`, `game.js`, `scoring.js`,
+  or any domain module. Pure UI change.

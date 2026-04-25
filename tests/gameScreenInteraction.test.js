@@ -116,7 +116,7 @@ describe('GameScreen click-to-stage interactions', () => {
     expect(row.classes()).not.toContain('consumed');
   });
 
-  it('does not append the letter again when an already-claimed tile is clicked', async () => {
+  it('removes the letter from input when an already-claimed tile is clicked', async () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
     });
@@ -125,8 +125,105 @@ describe('GameScreen click-to-stage interactions', () => {
     await input.setValue('cat');
 
     const tiles = wrapper.findAll('.tile-rack .tile');
-    await tiles[0].trigger('mousedown');
+    await tiles[1].trigger('mousedown');
 
-    expect(input.element.value).toBe('cat');
+    expect(input.element.value).toBe('ct');
+  });
+
+  it('removes the entire word\'s letters from input when an already-consumed word row is clicked', async () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: ['b'], words: ['rook'] }),
+        dict,
+      },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('brook');
+
+    const wordRows = wrapper.findAll('.word-row');
+    await wordRows[0].trigger('mousedown');
+
+    expect(input.element.value).toBe('b');
+  });
+
+  it('removes only the letters of the clicked word, leaving extras intact', async () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: ['b', 'a'], words: ['rook'] }),
+        dict,
+      },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('barook');
+
+    const wordRows = wrapper.findAll('.word-row');
+    await wordRows[0].trigger('mousedown');
+
+    expect(input.element.value).toBe('ba');
+  });
+
+  it('removes letters case-insensitively while preserving the case of remaining letters', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('CAT');
+
+    const tiles = wrapper.findAll('.tile-rack .tile');
+    await tiles[1].trigger('mousedown');
+
+    expect(input.element.value).toBe('CT');
+  });
+
+  it('drops the used class from the clicked tile after click-to-remove', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('a');
+    expect(wrapper.findAll('.tile-rack .tile')[1].classes()).toContain('used');
+
+    await wrapper.findAll('.tile-rack .tile')[1].trigger('mousedown');
+    expect(wrapper.findAll('.tile-rack .tile')[1].classes()).not.toContain('used');
+  });
+
+  it('renders a Clear button that resets typed input when clicked', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('cat');
+
+    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
+    expect(clearBtn).toBeDefined();
+    await clearBtn.trigger('click');
+
+    expect(input.element.value).toBe('');
+  });
+
+  it('Clear button is disabled when typed input is empty', () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
+    expect(clearBtn.attributes('disabled')).toBeDefined();
+  });
+
+  it('Clear button is enabled when typed input is non-empty', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('c');
+
+    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
+    expect(clearBtn.attributes('disabled')).toBeUndefined();
   });
 });

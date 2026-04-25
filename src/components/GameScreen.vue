@@ -32,15 +32,40 @@ const consumption = computed(() =>
   highlightConsumption(typed.value, game.value.pool)
 );
 
+function removeFirstOccurrence(s, ch) {
+  const target = ch.toLowerCase();
+  const lower = s.toLowerCase();
+  const idx = lower.indexOf(target);
+  if (idx === -1) return s;
+  return s.slice(0, idx) + s.slice(idx + 1);
+}
+
+function removeWordLetters(s, word) {
+  let out = s;
+  for (const ch of word) out = removeFirstOccurrence(out, ch);
+  return out;
+}
+
 function onTileClick(i) {
-  if (consumption.value.loose.has(i)) return;
-  typed.value += looseLetters.value[i];
+  if (consumption.value.loose.has(i)) {
+    typed.value = removeFirstOccurrence(typed.value, looseLetters.value[i]);
+  } else {
+    typed.value += looseLetters.value[i];
+  }
   clearFeedback();
 }
 
 function onWordClick(i) {
-  if (consumption.value.words.has(i)) return;
-  typed.value += playerWords.value[i].word;
+  if (consumption.value.words.has(i)) {
+    typed.value = removeWordLetters(typed.value, playerWords.value[i].word);
+  } else {
+    typed.value += playerWords.value[i].word;
+  }
+  clearFeedback();
+}
+
+function onClear() {
+  typed.value = '';
   clearFeedback();
 }
 
@@ -162,6 +187,7 @@ function formatTime(ms) {
         spellcheck="false"
         @input="clearFeedback"
       />
+      <button type="button" class="action-btn" :disabled="!typed" @click="onClear">Clear</button>
       <button type="submit" class="action-btn primary">Submit</button>
     </form>
 

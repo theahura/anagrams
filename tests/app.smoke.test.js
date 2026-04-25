@@ -49,6 +49,23 @@ describe('App smoke', () => {
     expect(input.element.value.length).toBe(1);
   });
 
+  it('Clear button empties the typed input from the App boundary', async () => {
+    const wrapper = mount(App);
+    await wrapper.findAll('button').find((b) => b.text().includes('Daily')).trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('hello');
+    expect(input.element.value).toBe('hello');
+
+    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
+    expect(clearBtn).toBeDefined();
+    await clearBtn.trigger('click');
+
+    expect(input.element.value).toBe('');
+  });
+
   it('rejects an unknown word with feedback', async () => {
     const wrapper = mount(App);
     await wrapper.findAll('button').find((b) => b.text().includes('Daily')).trigger('click');
