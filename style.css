@@ -456,6 +456,103 @@ button.word-row {
   outline-offset: 2px;
 }
 
+button.home-calendar-cell {
+  appearance: none;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+button.home-calendar-cell:hover {
+  border-color: #818384;
+  transform: translateY(-1px);
+}
+
+button.home-calendar-cell:focus-visible {
+  outline: 3px solid #b59f3b;
+  outline-offset: 2px;
+}
+
+.day-popover {
+  position: fixed;
+  width: 220px;
+  background: #1f1f20;
+  color: #d7dadc;
+  border: 1px solid #3a3a3c;
+  border-radius: 6px;
+  padding: 14px 16px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
+.day-popover:focus {
+  outline: none;
+}
+
+.day-popover:focus-visible {
+  outline: 3px solid #b59f3b;
+  outline-offset: 2px;
+}
+
+.day-popover-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: transparent;
+  border: 0;
+  color: #818384;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.day-popover-close:hover {
+  color: #d7dadc;
+}
+
+.day-popover-close:focus-visible {
+  outline: 2px solid #b59f3b;
+  outline-offset: 1px;
+}
+
+.day-popover-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  padding-right: 24px;
+  color: #d7dadc;
+  letter-spacing: 0.5px;
+}
+
+.day-popover-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.day-popover-row + .day-popover-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.day-popover-label {
+  color: #818384;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.day-popover-value {
+  color: #d7dadc;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .rules {
   text-align: left;
   margin-top: 36px;

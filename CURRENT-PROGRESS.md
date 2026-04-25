@@ -595,6 +595,109 @@ templates, no domain modules, no new dependencies.
   the codebase declares no `scroll-behavior: smooth` anywhere — the
   reset would be dead code. YAGNI.
 
+### `feat/initial-game` — Per-day detail popover on calendar cells (this commit)
+
+Surfaces the existing per-day record data (`score`, `longestWord`,
+`durationMs`, `completedAt`) that the v5 persistence layer has been
+storing all along. The 7-day calendar strip on the home screen
+previously rendered all cells as non-interactive `<div role="img">`
+elements with state shown only via fill color and a tooltip-only date
+label. Played cells now render as `<button type="button">` and open a
+small accessible popover when clicked. No domain-module changes; no
+storage schema change.
+
+#### New / changed
+- `src/components/HomeScreen.vue`:
+  - Played calendar cells flip from `<div role="img">` to
+    `<button type="button" aria-haspopup="dialog" aria-expanded
+    aria-controls>`. Unplayed cells stay as `<div role="img">`
+    (no behavior or accessible-name change).
+  - New transient state: `selectedIndex` ref (null when closed,
+    cell index when open), `panelPos` (`{top, left}` for fixed
+    positioning), `cellRefs` (template-ref array, populated only
+    for played cells via a `setCellRef(i)` factory), `panelRef`
+    on the popover panel.
+  - `onCellClick(i, ev)` captures `ev.currentTarget.getBounding
+    ClientRect()`, computes a `position: fixed` anchor below the
+    cell, viewport-edge clamped to the viewport (`PANEL_W = 220`,
+    8 px margin), and sets `selectedIndex = i`.
+  - `closePopover({restoreFocus = true})` sets `selectedIndex
+    = null`. Triggered by the close button (restore focus), Escape
+    via `onDocKeydown` (restore focus), or outside `mousedown` via
+    `onDocMousedown` (do NOT restore focus — the user's pointer
+    has already landed somewhere else; pulling focus back would
+    interrupt their next action). Outside-mousedown uses
+    `event.composedPath()` to skip the panel itself and any cell
+    trigger.
+  - Central `watch(selectedIndex, …)` is the open/close state
+    machine: registers the document-level `mousedown` + `keydown`
+    listeners on open, removes them on close, calls
+    `panelRef.focus()` on `nextTick()` after open, and
+    `cellRefs[prev].focus()` on close. `onBeforeUnmount` removes
+    listeners defensively.
+  - `watch(() => props.recent, …)` auto-closes the popover when
+    `recent` changes (e.g. after finishing a daily run and
+    returning home), avoiding stale data.
+  - Popover panel rendered via `<Teleport to="body">` so its
+    fixed-position layering is independent of any parent stacking
+    context. Panel: `role="dialog" aria-modal="false"
+    aria-labelledby="day-popover-title" tabindex="-1"`. Contents:
+    human date heading (`Tuesday, April 22`), score, longest word,
+    duration formatted as `m:ss` via `formatDuration(ms)`. Close
+    button: `<button class="day-popover-close" aria-label="Close">×`.
+- `style.css`:
+  - `button.home-calendar-cell` reset (`appearance: none; padding:
+    0; cursor: pointer`), hover `transform: translateY(-1px)`, and
+    `:focus-visible` outline (mirrors the existing tile
+    focus-ring palette).
+  - `.day-popover` (220 px fixed panel, dark `#1f1f20` background,
+    border, rounded corners, `box-shadow` for lift, `z-index:
+    1000`).
+  - `.day-popover-close`, `.day-popover-title`, `.day-popover-row`,
+    `.day-popover-label`, `.day-popover-value` with the existing
+    palette (`#3a3a3c` border, `#818384` label gray, `#d7dadc`
+    value).
+
+#### Tests added
+- `tests/homeScreen.test.js` — new
+  `describe('HomeScreen day-detail popover', …)` block, 12 tests:
+  initial-no-popover; clicking-unplayed-cell-does-not-open;
+  played-cell-trigger-exposes-aria-haspopup-and-aria-expanded;
+  click-opens-dialog (`role="dialog" aria-modal="false"`);
+  popover-content (score, longest word, duration formatted as
+  `m:ss`); human-date-heading; close-button-dismisses;
+  Escape-dismisses; outside-mousedown-dismisses (manual
+  `document.dispatchEvent(new MouseEvent('mousedown', {bubbles:
+  true, composed: true}))`); focus-returns-to-trigger after Escape
+  (`document.activeElement === triggerCell` with
+  `attachTo: document.body`); focus-does-NOT-return after outside-
+  mousedown (intentional asymmetry — the user's pointer has
+  already moved); switch-on-different-cell shows the new cell's
+  record and not the previous one.
+
+#### Documentation
+- `src/components/docs.md` — extended HomeScreen section with the
+  played/unplayed cell render split, the popover state shape and
+  `<Teleport to="body">` rationale, the central
+  `watch(selectedIndex)` state machine, the three dismiss paths,
+  the focus-return contract, and the `watch(() => props.recent)`
+  auto-clear. Added "Things to Know" entries for one-popover-at-a-
+  time, outside-mousedown trigger exclusion (flicker prevention
+  when switching cells), teleport / z-index rationale, and
+  optional-chaining defense on `entry.record`.
+- `src/docs.md` — tightened the Recent-days bullet to enumerate
+  the underlying record fields and notes that the HomeScreen
+  popover now reads them on click.
+
+#### Verified
+- `npm test` — 166/166 passing (was 154; +12 new). Existing
+  calendar tests still pass on the `<button>`-instead-of-`<div>`
+  markup for played cells.
+- `npm run build` — production bundle builds cleanly in 0.6 s.
+  CSS now 9.18 kB (was 7.80 kB; +1.38 kB for the new popover
+  rules); JS at 100.98 kB raw / 39.03 kB gzipped (was 100.89 kB
+  / 39.00 kB; +0.1 kB for the popover state machine).
+
 ## Open follow-ups (next commits)
 
 - Sticky-claim or staged-array model so click-to-remove on duplicate
@@ -607,9 +710,10 @@ templates, no domain modules, no new dependencies.
 - Score-tier color heatmap on calendar cells (currently boolean
   filled/hollow). Add only if play-tester feedback says scores are hard
   to interpret at a glance.
-- Click-a-calendar-cell to open a per-day detail popup (longest word,
-  duration, share-text replay). Currently cells are non-interactive —
-  tooltip + screen-reader label is the only disclosure.
+- Share-text replay from a past day on the calendar popover.
+  `history` (transformation chain) is not currently in storage —
+  would require a schema migration to surface a full Wordle-style
+  share grid for past days.
 - Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
 - A11y polish round 2: keyboard activation tests in a real browser
   (Playwright) instead of happy-dom; live-region announcements verified

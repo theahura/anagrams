@@ -828,6 +828,149 @@ used by daily-puzzle games.
 - Streak protection / freeze tokens, longest-word "best",
   past-month grid view. All deferred.
 
+## Per-day detail popover on calendar cell click (v10 commit)
+
+Open follow-up from CURRENT-PROGRESS.md: "Click-a-calendar-cell to open a per-day detail popup (longest word, duration, share-text replay). Currently cells are non-interactive — tooltip + screen-reader label is the only disclosure."
+
+The streak/best persistence layer (v5) records full per-day entries
+(`{score, longestWord, durationMs, completedAt}`) and the v8 calendar
+strip displays *only* the `played` boolean. This commit makes played
+cells clickable and shows the rich underlying data on demand.
+
+### Findings (knowledge-researcher summary)
+
+- **ARIA pattern**: `role="dialog"` + `aria-modal="false"` is the
+  de-facto convention for a non-modal popover that contains
+  selectable text. `role="region"` is too weak (no implicit
+  interactive semantics); `role="tooltip"` implies hover-only and
+  no interactive content. Trigger: `aria-haspopup="dialog"`,
+  `aria-expanded="true|false"`, `aria-controls="<panel-id>"`.
+  Panel: `aria-labelledby` pointing at a heading inside.
+- **Keyboard**: Escape closes; focus must return to the originating
+  trigger button. Tab can leave (non-modal — no focus trap).
+  Click-outside dismisses.
+- **Native HTML `popover` attribute** (Baseline 2024) is tempting
+  for the free Escape + light-dismiss + invoker focus return —
+  BUT happy-dom's `showPopover()` support is incomplete, light-
+  dismiss does not fire in tests, and reka-ui devs explicitly
+  switch to jsdom for popover tests. Verdict: roll our own. The
+  same `role="dialog"` markup remains valid if a future commit
+  swaps in `popover="auto"`.
+- **CSS anchor positioning** (`anchor-name` / `position-anchor`)
+  is NOT Baseline yet (Firefox 145 still behind a flag late
+  2025). Skip. For 7 cells in one row, JS-computed
+  `getBoundingClientRect()` + `position: fixed` with a 1-line
+  viewport-edge clamp is ~10 lines and fully sufficient.
+- **No new dependency**: VueUse's `onClickOutside` is sound but
+  adds a dep for ~15 lines of code. A small composable
+  `useDismissable(panelRef, triggerRef, onDismiss)` handles
+  Escape + outside-mousedown + colocates the close logic.
+  Use `mousedown` (not `click`) so dismiss happens before any
+  inside-target absorbs the click. Use `event.composedPath()` so
+  the trigger button itself doesn't double-toggle.
+- **Testing in happy-dom**: `wrapper.trigger('mousedown')` is on
+  the element, not document — to test outside-click, must
+  manually `document.dispatchEvent(new MouseEvent('mousedown', {
+  bubbles: true, composed: true }))`. `document.activeElement`
+  invariant requires `attachTo: document.body` on mount.
+
+### Decisions
+
+1. **Cells become buttons when played, stay `<div>`s when not**.
+   `HomeScreen.vue`'s calendar cell renders as
+   `<button type="button" class="home-calendar-cell played
+   today?" aria-haspopup="dialog" aria-expanded :aria-controls>`
+   when `entry.played`. Otherwise stays as the existing
+   `<div role="img" aria-label>`. Unplayed cells have nothing
+   to show — no need to expose them as interactive controls.
+2. **Single popover at the HomeScreen level** (not one per
+   cell). State: `selectedIndex` ref. Click on cell N sets
+   `selectedIndex = N`; click again on the same cell, click
+   outside, Escape, or the close button sets `selectedIndex
+   = null`.
+3. **Popover positioning**: on cell click, capture
+   `event.currentTarget.getBoundingClientRect()` and store
+   `{ top, left, width }`. Render the popover with `position:
+   fixed` anchored below the cell:
+   `top = rect.bottom + 8; left = clamp(rect.left + rect.width/2
+   - panelW/2, 8, viewportW - panelW - 8)`. Panel width fixed
+   at ~220 px so we can clamp predictably.
+4. **Popover content** (purely from `entry.record`):
+   - `<h3 id="day-popover-title">{date heading}</h3>` —
+     human date (`Tuesday, April 22`).
+   - Score (large).
+   - Longest word, length annotation.
+   - Duration (mm:ss).
+   - Close button (X icon, `aria-label="Close"`).
+   No share-text replay in v10. The history transformation chain
+   is not stored — only the longest word string. Replay would
+   require migrating the storage schema; out of scope per YAGNI.
+5. **Composable `useDismissable` lives inline in
+   `HomeScreen.vue`** as a `function setup` helper. It is not
+   reused elsewhere in the codebase; promotion to a dedicated
+   `composables/` module is YAGNI.
+6. **Focus management**: When `selectedIndex` becomes non-null,
+   move focus to the panel root (`tabindex="-1"` so it is
+   programmatically focusable but not in the tab order). When
+   it becomes null, return focus to the triggering cell button.
+7. **Mobile**: same fixed-position popover. The 24 px cell on
+   mobile yields enough anchor space; the panel wraps within
+   viewport via the clamp logic.
+8. **No domain-module changes**. `storage.js`, `share.js`,
+   `game.js`, and the GameScreen tree are untouched.
+
+### Tests
+
+- `tests/homeScreen.test.js` (extend):
+  - **No popover by default** — initial mount with played
+    history shows no `[role="dialog"]` element.
+  - **Played cell is a `<button>` with proper ARIA** — assert
+    `aria-haspopup="dialog"`, `aria-expanded="false"` initially,
+    has an `aria-controls` attribute.
+  - **Unplayed cell is NOT a button** — stays as a `<div>` (no
+    interaction surface).
+  - **Click on played cell opens popover** — after
+    `cell.trigger('click')`, a `[role="dialog"]` element exists
+    in the DOM and contains the day's score, longest word, and
+    duration text.
+  - **Trigger's `aria-expanded` flips to `true`** when popover
+    opens, back to `false` when closed.
+  - **Click on close button closes the popover** —
+    `[role="dialog"]` is gone after `closeButton.trigger('click')`.
+  - **Escape key closes the popover** — keydown Escape on the
+    panel dismisses.
+  - **Outside-click closes the popover** — manual
+    `document.dispatchEvent(new MouseEvent('mousedown', {bubbles:
+    true, composed: true}))` dismisses.
+  - **Focus returns to the trigger after close** — assert
+    `document.activeElement === triggerCell` after Escape (with
+    `attachTo: document.body`).
+  - **Popover content shows formatted date, score, longest word,
+    duration mm:ss** — assertions on the panel's text content.
+  - **Clicking a different played cell switches the popover to
+    that cell's data** — re-trigger on cell B, panel content
+    updates to B's entry.
+- No changes to `app.smoke.test.js` (smoke is coarse, popover
+  state is well-covered at the component test level).
+- No changes to `storage.test.js` (schema unchanged).
+
+### Out of scope (intentional)
+
+- Share-text replay from a past day. The `history`
+  transformation chain is not in storage; would require a
+  schema migration. Defer.
+- Hover-to-preview popover. Click-only is fine for v10;
+  hover would require interaction-vs-intent timeout
+  bookkeeping (industry consensus: 100-300 ms delay on hover-
+  show, click-to-pin pattern).
+- Popover positioning via CSS anchor positioning. Not Baseline
+  yet.
+- Native HTML `popover` attribute. Test compatibility friction
+  is not worth the dep-savings — we already roll the dismiss
+  logic by hand.
+- Animation on open/close. The existing `prefers-reduced-motion`
+  reset would require special-casing if we added one. YAGNI.
+
 ## prefers-reduced-motion honouring (v9 commit)
 
 Open follow-up from CURRENT-PROGRESS.md: "`prefers-reduced-motion`

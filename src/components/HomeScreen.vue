@@ -1,5 +1,7 @@
 <script setup>
-defineProps({
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+
+const props = defineProps({
   loading: { type: Boolean, default: false },
   streak: { type: Number, default: 0 },
   best: { type: Number, default: 0 },
@@ -9,6 +11,24 @@ defineProps({
 defineEmits(['start']);
 
 const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const POPOVER_ID = 'home-day-popover';
+const PANEL_W = 220;
+
+const selectedIndex = ref(null);
+const panelPos = ref({ top: 0, left: 0 });
+const cellRefs = ref([]);
+const panelRef = ref(null);
+
+function setCellRef(i) {
+  return (el) => {
+    cellRefs.value[i] = el;
+  };
+}
+
+const selectedEntry = computed(() => {
+  if (selectedIndex.value === null) return null;
+  return props.recent[selectedIndex.value] ?? null;
+});
 
 function parseDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -39,6 +59,78 @@ function cellLabel(entry, isToday) {
     ? `Score ${entry.record?.score ?? 0}, ${human}`
     : `Not played, ${human}`;
 }
+
+function formatDuration(ms) {
+  const total = Math.max(0, Math.floor((ms ?? 0) / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function computePosition(triggerEl) {
+  const rect = triggerEl.getBoundingClientRect();
+  const viewportW = window.innerWidth || document.documentElement.clientWidth;
+  const rawLeft = rect.left + rect.width / 2 - PANEL_W / 2;
+  const left = Math.max(8, Math.min(rawLeft, viewportW - PANEL_W - 8));
+  return { top: rect.bottom + 8, left };
+}
+
+let restoreFocusOnClose = true;
+
+function onCellClick(i, ev) {
+  panelPos.value = computePosition(ev.currentTarget);
+  selectedIndex.value = i;
+}
+
+function closePopover({ restoreFocus = true } = {}) {
+  restoreFocusOnClose = restoreFocus;
+  selectedIndex.value = null;
+}
+
+function onDocMousedown(ev) {
+  if (selectedIndex.value === null) return;
+  const path = ev.composedPath ? ev.composedPath() : [];
+  if (panelRef.value && path.includes(panelRef.value)) return;
+  for (const el of cellRefs.value) {
+    if (el && path.includes(el)) return;
+  }
+  closePopover({ restoreFocus: false });
+}
+
+function onDocKeydown(ev) {
+  if (selectedIndex.value === null) return;
+  if (ev.key === 'Escape') closePopover();
+}
+
+watch(selectedIndex, async (val, prev) => {
+  if (val !== null) {
+    document.addEventListener('mousedown', onDocMousedown);
+    document.addEventListener('keydown', onDocKeydown);
+    await nextTick();
+    panelRef.value?.focus();
+  } else {
+    document.removeEventListener('mousedown', onDocMousedown);
+    document.removeEventListener('keydown', onDocKeydown);
+    if (restoreFocusOnClose && prev !== null && cellRefs.value[prev]) {
+      cellRefs.value[prev].focus();
+    }
+    restoreFocusOnClose = true;
+  }
+});
+
+watch(
+  () => props.recent,
+  () => {
+    if (selectedIndex.value !== null) {
+      closePopover({ restoreFocus: false });
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocMousedown);
+  document.removeEventListener('keydown', onDocKeydown);
+});
 </script>
 
 <template>
@@ -87,15 +179,65 @@ function cellLabel(entry, isToday) {
         class="home-calendar-day"
       >
         <span class="home-calendar-letter">{{ weekdayLetter(entry.date) }}</span>
+        <button
+          v-if="entry.played"
+          type="button"
+          :ref="setCellRef(i)"
+          class="home-calendar-cell played"
+          :class="{ today: i === recent.length - 1 }"
+          :aria-label="cellLabel(entry, i === recent.length - 1)"
+          :title="cellLabel(entry, i === recent.length - 1)"
+          aria-haspopup="dialog"
+          :aria-expanded="(selectedIndex === i).toString()"
+          :aria-controls="POPOVER_ID"
+          @click="onCellClick(i, $event)"
+        ></button>
         <div
+          v-else
           class="home-calendar-cell"
           role="img"
-          :class="{ played: entry.played, today: i === recent.length - 1 }"
+          :class="{ today: i === recent.length - 1 }"
           :aria-label="cellLabel(entry, i === recent.length - 1)"
           :title="cellLabel(entry, i === recent.length - 1)"
         ></div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="selectedEntry"
+        :id="POPOVER_ID"
+        ref="panelRef"
+        class="day-popover"
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="day-popover-title"
+        tabindex="-1"
+        :style="{ top: panelPos.top + 'px', left: panelPos.left + 'px' }"
+      >
+        <button
+          type="button"
+          class="day-popover-close"
+          aria-label="Close"
+          @click="closePopover"
+        >×</button>
+        <h3 id="day-popover-title" class="day-popover-title">
+          {{ humanDate(selectedEntry.date) }}
+        </h3>
+        <div class="day-popover-row">
+          <span class="day-popover-label">Score</span>
+          <span class="day-popover-value">{{ selectedEntry.record?.score ?? 0 }}</span>
+        </div>
+        <div class="day-popover-row">
+          <span class="day-popover-label">Longest</span>
+          <span class="day-popover-value">{{ selectedEntry.record?.longestWord || '—' }}</span>
+        </div>
+        <div class="day-popover-row">
+          <span class="day-popover-label">Time</span>
+          <span class="day-popover-value">{{ formatDuration(selectedEntry.record?.durationMs) }}</span>
+        </div>
+      </div>
+    </Teleport>
 
     <p v-if="loading" class="home-loading">Loading dictionary…</p>
 
