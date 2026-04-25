@@ -700,6 +700,19 @@ storage schema change.
 
 ## Open follow-ups (next commits)
 
+- **Bug: pure-rearrangement anagrams of an existing word are allowed.**
+  `canFormWord` rejects exact replay (`consumedWords.includes(word)`)
+  but does not reject same-length rearrangements that consume a
+  single parent: `side → dies → side → dies …` is currently a legal
+  infinite loop. The intended rule is that any word formed from
+  preexisting words must strictly *grow* — the new word's length
+  must exceed every consumed parent's length. Loose-letter draws
+  trivially satisfy this; combining two or more parents (`res + side
+  → resides`, length 7 > 4 and > 3) does too; rearranging a single
+  parent does not. Fix lives in `src/anagramRules.js`: reject when
+  `consumedWords.length > 0 && typed.length <= max(parent.length for
+  parent in consumedWords)`. Note `nub + s → snub` (1 parent + 1
+  loose) stays valid because typed.length (4) > parent.length (3).
 - Sticky-claim or staged-array model so click-to-remove on duplicate
   leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not
