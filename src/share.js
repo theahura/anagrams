@@ -8,6 +8,7 @@ export function generateShareText({
   longestWord,
   totalTimeMs,
   history = [],
+  streak = 0,
 }) {
   const headerId = mode === 'daily' ? date : 'Random';
   const header = `Anagrams ${headerId} — ${score}`;
@@ -23,9 +24,11 @@ export function generateShareText({
 
   const longestLen = (longestWord || '').length;
   const time = formatTime(totalTimeMs);
-  const footer = longestLen
-    ? `Longest ${longestLen} · Time ${time}`
-    : `Time ${time}`;
+  const parts = [];
+  if (longestLen) parts.push(`Longest ${longestLen}`);
+  parts.push(`Time ${time}`);
+  if (mode === 'daily' && streak >= 2) parts.push(`Streak ${streak}`);
+  const footer = parts.join(' · ');
 
   const sections = [header];
   if (rows.length > 0) sections.push('', ...rows);

@@ -6,6 +6,8 @@ const props = defineProps({
   result: { type: Object, required: true },
   mode: { type: String, required: true },
   date: { type: String, default: null },
+  streak: { type: Number, default: 0 },
+  isNewBest: { type: Boolean, default: false },
 });
 defineEmits(['home']);
 
@@ -19,6 +21,7 @@ async function onShare() {
     longestWord: props.result.longestWord,
     totalTimeMs: props.result.totalTimeMs,
     history: props.result.history,
+    streak: props.streak,
   });
   try {
     await navigator.clipboard.writeText(text);
@@ -58,6 +61,11 @@ function formatTime(ms) {
         <div class="score-label">Missed draws</div>
         <div class="score-value">{{ result.missedDrawCount }}</div>
       </div>
+    </div>
+
+    <div v-if="mode === 'daily' && (streak > 0 || isNewBest)" class="score-streak-row">
+      <span v-if="streak > 0" class="score-streak">Streak <strong>{{ streak }}</strong></span>
+      <span v-if="isNewBest" class="new-best-pill">New best!</span>
     </div>
 
     <div v-if="result.longestWord" class="longest-section">

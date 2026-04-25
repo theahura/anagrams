@@ -5,6 +5,14 @@ import GameScreen from './GameScreen.vue';
 import ScoreScreen from './ScoreScreen.vue';
 import { loadDictionary } from '../dictionary.js';
 import { createGame } from '../game.js';
+import {
+  loadStore,
+  recordDailyResult,
+  currentStreak,
+  bestScore,
+  hasCompletedDate,
+  browserStorage,
+} from '../storage.js';
 
 const screen = ref('home');
 const game = shallowRef(null);
@@ -12,6 +20,20 @@ const finalResult = ref(null);
 const dict = shallowRef(null);
 const dictLoading = ref(false);
 const dictError = ref(null);
+
+const storage = browserStorage();
+const stats = ref(computeStats());
+const isNewBest = ref(false);
+
+function computeStats() {
+  const today = todayUTC();
+  const { records } = loadStore(storage);
+  return {
+    streak: currentStreak(records, today),
+    best: bestScore(records),
+    completedToday: hasCompletedDate(records, today),
+  };
+}
 
 async function ensureDictionary() {
   if (dict.value) return dict.value;
@@ -40,12 +62,28 @@ async function startGame(mode) {
 
 function endGameWithResult(result) {
   finalResult.value = result;
+  isNewBest.value = false;
+  if (game.value?.mode === 'daily' && game.value?.date) {
+    const previousBest = bestScore(loadStore(storage).records);
+    const { wasNewRecord } = recordDailyResult(storage, {
+      date: game.value.date,
+      score: result.score,
+      longestWord: result.longestWord,
+      durationMs: result.totalTimeMs,
+    });
+    if (wasNewRecord && result.score > previousBest) {
+      isNewBest.value = true;
+    }
+    stats.value = computeStats();
+  }
   screen.value = 'score';
 }
 
 function returnHome() {
   game.value = null;
   finalResult.value = null;
+  isNewBest.value = false;
+  stats.value = computeStats();
   screen.value = 'home';
 }
 
@@ -67,6 +105,9 @@ function todayUTC() {
     <HomeScreen
       v-if="screen === 'home'"
       :loading="dictLoading"
+      :streak="stats.streak"
+      :best="stats.best"
+      :completed-today="stats.completedToday"
       @start="startGame"
     />
 
@@ -82,6 +123,8 @@ function todayUTC() {
       :result="finalResult"
       :mode="game.mode"
       :date="game.date"
+      :streak="stats.streak"
+      :is-new-best="isNewBest"
       @home="returnHome"
     />
   </div>

@@ -158,3 +158,60 @@ describe('generateShareText — emoji grid', () => {
     expect(text).toMatch(/Time\s*5:00\b/);
   });
 });
+
+describe('generateShareText — streak suffix', () => {
+  it('appends Streak <N> in daily mode when streak is at least 2', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 50,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      streak: 5,
+    });
+    expect(text).toMatch(/Streak\s*5\b/);
+  });
+
+  it('does not include Streak when streak is 1', () => {
+    const text = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 50,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      streak: 1,
+    });
+    expect(text).not.toMatch(/Streak/);
+  });
+
+  it('does not include Streak when streak is 0 or omitted', () => {
+    const omitted = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 50,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+    });
+    const zero = generateShareText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 50,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      streak: 0,
+    });
+    expect(omitted).not.toMatch(/Streak/);
+    expect(zero).not.toMatch(/Streak/);
+  });
+
+  it('does not include Streak in random mode regardless of streak value', () => {
+    const text = generateShareText({
+      mode: 'random',
+      score: 50,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      streak: 7,
+    });
+    expect(text).not.toMatch(/Streak/);
+  });
+});

@@ -1,6 +1,9 @@
 <script setup>
 defineProps({
   loading: { type: Boolean, default: false },
+  streak: { type: Number, default: 0 },
+  best: { type: Number, default: 0 },
+  completedToday: { type: Boolean, default: false },
 });
 defineEmits(['start']);
 </script>
@@ -18,7 +21,10 @@ defineEmits(['start']);
         @click="$emit('start', 'daily')"
       >
         <span class="mode-title">Daily Challenge</span>
-        <span class="mode-sub">Same shuffle for everyone today</span>
+        <span class="mode-sub">
+          Same shuffle for everyone today
+          <span v-if="completedToday" class="played-today-tag">✓ Played today</span>
+        </span>
       </button>
 
       <button
@@ -29,6 +35,11 @@ defineEmits(['start']);
         <span class="mode-title">Random Trial</span>
         <span class="mode-sub">A fresh shuffle every time</span>
       </button>
+    </div>
+
+    <div v-if="streak > 0 || best > 0" class="home-stats">
+      <span class="home-stat">Streak <strong>{{ streak }}</strong></span>
+      <span class="home-stat">Best <strong>{{ best }}</strong></span>
     </div>
 
     <p v-if="loading" class="home-loading">Loading dictionary…</p>

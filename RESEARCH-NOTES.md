@@ -307,3 +307,117 @@ itself stands: clicking a used tile should be reversible, not a no-op.)
     coarse — no need to repeat at the App boundary).
 - No changes to `staging.js`, `anagramRules.js`, `game.js`, `scoring.js`,
   or any domain module. Pure UI change.
+
+## Daily streak / best-score persistence (v5 commit)
+
+Open follow-up: persistence (local-storage) for daily streak / past
+scores. Researched Wordle / Connections / VueUse conventions and
+localStorage pitfalls.
+
+### Findings
+
+- **Streak semantics**: in Wordle and NYT Connections the streak only
+  *increments* on a finish whose previous-day record exists, but the
+  displayed counter persists across the gap until the user finishes
+  another puzzle (the "preserve-but-at-risk" pattern). If yesterday is
+  also missing, the next finish recomputes from scratch (= 1). Sources:
+  Tom's Guide "I lost my Wordle streak", GameRant "Wordle streak resets",
+  TechRadar Connections rules.
+- **Schema**: single JSON blob under one key (`anagrams:v1`). Per-day or
+  per-field keys multiply quota overhead, fragment writes, and create
+  migration headaches. Persist only `{ schemaVersion, records: { date:
+  {score, longestWord, durationMs, completedAt} } }`. Streak and best
+  are derived on load — never persist them, since stale derived state is
+  the most common bug class.
+- **Same-day re-finish**: keep the *first* completion (Wordle locks the
+  result on first solve). Simpler than "keep best" and prevents the
+  "play once for the streak, replay for the high score" exploit.
+- **Pitfalls**: Safari Private Mode reports a 0-byte quota and throws
+  `QuotaExceededError` on `setItem`; defensive try/catch is mandatory
+  (Muffin Man blog, Michal Zalecki). Firefox ETP/Private wipes session
+  storage but does not throw. SSR is N/A — Vite SPA, but a
+  `typeof window !== 'undefined'` guard costs nothing.
+- **Library choice**: VueUse's `useStorage` is sound but adds a
+  dependency for one schema. A ~30-line module is preferable here. No
+  new deps.
+- **UTC vs local midnight**: industry consensus is local midnight, but
+  the existing daily-puzzle seed in this repo already uses UTC
+  (`App.vue#todayUTC`). For consistency between puzzle ID and streak
+  key, *keep UTC for v5*. If a future commit moves the puzzle ID to
+  local midnight, the streak key follows automatically. YAGNI on a
+  separate locale-aware storage key.
+
+### Decisions
+
+1. New module `src/storage.js`. Pure functions over an injected
+   storage shim (so tests can pass a `Map`-backed fake without touching
+   `window.localStorage`):
+   - `loadStore(storage)` → `{ records: {date: {...}}, schemaVersion }`,
+     defaulting to empty on missing/corrupt/quota error.
+   - `recordDailyResult(storage, { date, score, longestWord, durationMs })`
+     → idempotent on re-call (keep-first per date). Returns `{ stored,
+     wasNewRecord }`. Swallows write errors and returns `wasNewRecord:
+     false` on failure (private mode degrades gracefully).
+   - `currentStreak(records, todayDate)` → integer. Counts back from
+     today (or yesterday if today missing) over consecutive UTC dates.
+     Handles the empty case → 0. Pure date arithmetic on `YYYY-MM-DD`
+     strings via `Date.UTC` parse + 86400000 step.
+   - `bestScore(records)` → integer (max over records, 0 if empty).
+   - `hasCompletedDate(records, date)` → bool.
+2. Production binding: `src/storage.js` exports a `browserStorage()`
+   helper that returns `window.localStorage` if available, else a
+   no-op shim — so `App.vue` can pass `browserStorage()` once at top
+   level and never branch.
+3. UI surface:
+   - `HomeScreen.vue` props gain `streak` and `best`. A new
+     `<div class="home-stats">Streak <strong>{{streak}}</strong>
+     · Best <strong>{{best}}</strong></div>` renders below the
+     buttons when either is non-zero. The "Daily Challenge" button
+     gets a small "✓ Played today" sub-label when today is complete.
+   - `ScoreScreen.vue` adds two optional new props `streak` and
+     `isNewBest` (computed by App). When mode === 'daily', shows a
+     small badge row below the score-grid: "Streak <N>" and a
+     "New best!" pill when applicable.
+   - `share.js` appends ` · Streak <N>` to the footer when in daily
+     mode and streak ≥ 2. Add a new `streak` field to the
+     `generateShareText` API; null/0/1 → no streak suffix.
+4. App.vue wiring: on entering 'home' screen and on entering 'score'
+   screen, recompute `streak`/`best`/`completedToday` from `loadStore`.
+   On entering 'score' screen for a daily game, call
+   `recordDailyResult` with `{date, score, longestWord, durationMs}`
+   *before* recomputing.
+
+### Tests
+
+- `tests/storage.test.js` (new): all pure-function tests, using a
+  `Map`-backed fake storage shim:
+  - `loadStore` returns empty on missing key / invalid JSON / wrong
+    schema version.
+  - `recordDailyResult` writes a record and is keep-first on re-call.
+  - `recordDailyResult` swallows write errors (quota exceeded fake)
+    and returns `wasNewRecord: false`.
+  - `currentStreak` returns 0 for empty records.
+  - `currentStreak` returns N for N consecutive days ending today.
+  - `currentStreak` returns N for N consecutive days ending yesterday
+     when today is missing (preserve-but-at-risk).
+  - `currentStreak` returns 0 when most recent record is ≥ 2 days ago.
+  - `bestScore` returns 0 for empty, max otherwise.
+  - `hasCompletedDate` returns true/false correctly.
+- `tests/share.test.js`: 2 new tests:
+  - daily mode + streak=5 footer contains ` · Streak 5`.
+  - random mode + streak=5 footer does NOT contain `Streak`.
+  - daily mode + streak=1 footer does NOT contain `Streak` (only ≥ 2
+    surfaces in share).
+- `tests/app.smoke.test.js`: 1 new test asserting the home screen
+  shows "Streak" + "Best" labels after a fake daily completion was
+  pre-seeded into a stubbed `localStorage`.
+
+### Out of scope (intentional)
+
+- Past-scores list / calendar grid.
+- Local-midnight reset (UTC keeps puzzle ID + streak in sync).
+- Streak protection / freeze tokens.
+- Cross-tab sync via `storage` event (single-player, single-tab
+  expected use).
+- LongestWord-best tracking — just score for v5; longest can be added
+  in a future polish pass.

@@ -18,6 +18,16 @@ beforeEach(() => {
       json: async () => dictionaryJson,
     }))
   );
+  const fakeStorage = (() => {
+    const data = new Map();
+    return {
+      getItem: (k) => (data.has(k) ? data.get(k) : null),
+      setItem: (k, v) => data.set(k, String(v)),
+      removeItem: (k) => data.delete(k),
+      clear: () => data.clear(),
+    };
+  })();
+  vi.stubGlobal('localStorage', fakeStorage);
 });
 
 describe('App smoke', () => {
@@ -64,6 +74,24 @@ describe('App smoke', () => {
     await clearBtn.trigger('click');
 
     expect(input.element.value).toBe('');
+  });
+
+  it('shows Streak and Best on the home screen when prior daily records exist', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const seeded = JSON.stringify({
+      schemaVersion: 1,
+      records: {
+        [yesterday]: { score: 247, longestWord: 'redefine', durationMs: 90000 },
+        [today]: { score: 80, longestWord: 'cat', durationMs: 30000 },
+      },
+    });
+    localStorage.setItem('anagrams:v1', seeded);
+
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toMatch(/Streak\s*2(?!\d)/);
+    expect(wrapper.text()).toMatch(/Best\s*247(?!\d)/);
   });
 
   it('rejects an unknown word with feedback', async () => {

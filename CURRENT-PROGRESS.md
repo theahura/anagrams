@@ -203,6 +203,83 @@ Adds a "Clear" button that resets the typed input in one action.
   to an explicit staged-array model (out of scope for a polish commit).
   Backspace and Clear both work as fallbacks.
 
+### `feat/initial-game` — Daily streak + best-score persistence (this commit)
+
+Adds a localStorage-backed persistence layer that records each finished
+Daily Challenge run, derives a current streak (consecutive UTC days)
+and a best score, and surfaces both on the Home and Score screens. The
+share text grows a ` · Streak <N>` suffix in daily mode when the streak
+is ≥ 2. Random Trial games never touch storage. No domain-module
+changes.
+
+#### New / changed
+- `src/storage.js` (new) — pure functions over an injected storage
+  shim. `loadStore` is robust to missing key / malformed JSON / wrong
+  schemaVersion / `getItem` throws. `recordDailyResult` is keep-first
+  per date (Wordle convention) and swallows `setItem` failures
+  (Safari Private Mode quota=0). `currentStreak` walks back day-by-day,
+  preserving the streak when today is missing but yesterday is
+  present. `bestScore` and `hasCompletedDate` are pure derivations.
+  `browserStorage()` returns `window.localStorage` after a probe write,
+  else a no-op shim. Schema: `{ schemaVersion: 1, records: { 'YYYY-MM-DD':
+  { score, longestWord, durationMs, completedAt } } }` under the single
+  key `anagrams:v1`. Streak and best are NEVER persisted as
+  denormalized state.
+- `src/share.js` — `generateShareText` accepts an optional `streak`
+  param; appends ` · Streak <N>` to the footer when `mode === 'daily'`
+  and `streak ≥ 2`. Backwards-compatible: omitted/0/1 produces the
+  prior output exactly.
+- `src/components/HomeScreen.vue` — accepts `streak`, `best`,
+  `completedToday` props. Renders a small stats row when either is
+  non-zero; "✓ Played today" sub-label on the Daily Challenge button
+  when `completedToday` is true.
+- `src/components/ScoreScreen.vue` — accepts `streak`, `isNewBest`
+  props; renders a streak / "New best!" pill row in daily mode. Passes
+  `streak` to `generateShareText`.
+- `src/components/App.vue` — owns a `stats` ref. `computeStats()` reads
+  storage and derives `{ streak, best, completedToday }`. On
+  `endGameWithResult` for daily games, snapshots the previous best
+  *before* calling `recordDailyResult` (keep-first means reading after
+  the write would always tie or lose), then sets `isNewBest`. Stats
+  recompute on home and score transitions.
+- `style.css` — `.home-stats`, `.home-stat`, `.played-today-tag`,
+  `.score-streak-row`, `.score-streak`, `.new-best-pill`. Dark palette
+  consistent with existing rules.
+
+#### Tests added
+- `tests/storage.test.js` (new) — 19 unit tests against a `Map`-backed
+  fake storage shim. Covers `loadStore` (empty / malformed / wrong
+  schemaVersion), `recordDailyResult` (round-trip / keep-first /
+  quota-exceeded swallow / `wasNewRecord` flag), `currentStreak`
+  (empty / today-only / N consecutive ending today / N consecutive
+  ending yesterday / 2-day-old gap / trailing-run-only / month and
+  year boundaries), `bestScore` (empty / max), `hasCompletedDate`.
+- `tests/share.test.js` — 4 new tests for the streak suffix
+  (daily+streak≥2 contains `Streak N`, streak=1 absent, omitted/0
+  absent, random+streak absent).
+- `tests/app.smoke.test.js` — `localStorage` stubbed in `beforeEach`;
+  new test pre-seeds storage with two daily records and verifies the
+  home screen shows "Streak", "Best", and the seeded high score.
+
+#### Documentation
+- `src/docs.md` (new) — noridoc covering domain core (game lifecycle,
+  three-pool model, anagram rules, scoring, dictionary), the new
+  storage layer's keep-first / derived-stats invariants, and the
+  share-text contract.
+- `src/components/docs.md` (new) — noridoc covering App.vue as the sole
+  storage caller, the previous-best-snapshot ordering, the
+  date-as-PRNG-seed-and-storage-key convention, and the props/events
+  boundary.
+
+#### Verified
+- `npm test` — 128/128 passing (was 104; +19 storage + 4 share + 1
+  smoke).
+- `npm run build` — production bundle builds cleanly (CSS now 6.54 kB
+  up from 5.78 kB; JS unchanged at ≈1.82 MB).
+- `npm run dev` — boots; index.html, components, dictionary asset all
+  served. HomeScreen now exposes `streak`, `best`, `completedToday`
+  props.
+
 ## Open follow-ups (next commits)
 
 - Performance: bundled JS is 1.8MB (mostly `wink-lemmatizer`); consider
@@ -211,9 +288,12 @@ Adds a "Clear" button that resets the typed input in one action.
   switch click handlers from `@mousedown.left.prevent` to `@click`
   (with `@mousedown.prevent` only for focus-suppression) so keyboard
   activation works.
-- Persistence (local-storage) for daily streak / past scores.
 - Sticky-claim or staged-array model so click-to-remove on duplicate
   leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not
   hit by typical games but possible.
-- noridoc initialization once folder structure stabilises.
+- Local-midnight reset for the Daily Challenge (industry consensus over
+  UTC). Currently UTC for parity with the existing puzzle seed; if we
+  move puzzle ID to local, the streak storage key follows automatically.
+- Past-scores list / 7-day calendar grid on the home screen.
+- Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
