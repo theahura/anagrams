@@ -14,6 +14,7 @@ import {
   recentDays,
   browserStorage,
 } from '../storage.js';
+import { todayLocal } from '../dateKey.js';
 
 const screen = ref('home');
 const game = shallowRef(null);
@@ -27,7 +28,7 @@ const stats = ref(computeStats());
 const isNewBest = ref(false);
 
 function computeStats() {
-  const today = todayUTC();
+  const today = todayLocal();
   const { records } = loadStore(storage);
   return {
     streak: currentStreak(records, today),
@@ -66,7 +67,7 @@ async function ensureDictionary() {
 async function startGame(mode) {
   const d = await ensureDictionary();
   if (!d) return;
-  const date = todayUTC();
+  const date = todayLocal();
   game.value = createGame({ mode, date }, d);
   screen.value = 'game';
 }
@@ -99,9 +100,6 @@ function returnHome() {
   screen.value = 'home';
 }
 
-function todayUTC() {
-  return new Date().toISOString().slice(0, 10);
-}
 </script>
 
 <template>

@@ -1310,3 +1310,111 @@ called for a past day.
   abstraction.
 - Re-rendering the share grid in the popover preview (just copies
   text). Future cosmetic.
+
+## Local-midnight Daily Challenge reset (v12 commit)
+
+Open follow-up from CURRENT-PROGRESS.md: "Local-midnight reset for the
+Daily Challenge (industry consensus over UTC). Currently UTC for parity
+with the existing puzzle seed; if we move puzzle ID to local, the
+streak storage key follows automatically."
+
+Today both the daily PRNG seed and the storage record key are derived
+from `new Date().toISOString().slice(0, 10)` (UTC). A user in Pacific
+time sees today's puzzle change at 5 PM the *prior* local day; a user
+on the east side of the date line sees the new puzzle hours before
+their local midnight. NYT Wordle, NYT Connections, and most daily-puzzle
+games reset at the user's local midnight by reading the device clock.
+
+### Findings (knowledge-researcher summary)
+
+- **Local YYYY-MM-DD formatting in vanilla JS**: idiomatic options are
+  `date.toLocaleDateString('en-CA')` (one-liner; abuses locale for its
+  format) and a manual `${y}-${pad(m+1)}-${pad(d)}` from
+  `getFullYear/getMonth/getDate`. For a primary key (puzzle seed,
+  storage key) the manual helper is preferred — three lines, no
+  locale dependency, no `Intl` runtime cost. The `Intl` working group
+  itself acknowledges `en-CA` "feels inappropriate" for this purpose
+  ([tc39/ecma402#891](https://github.com/tc39/ecma402/issues/891)).
+- **Mid-game "today" rollover**: industry consensus is **lock at
+  game-start**. Wordle's reset is local-midnight per device clock, and
+  if a user starts at 11:55 pm and finishes at 12:05 am, whatever
+  puzzle they opened is the puzzle they finish. Re-deriving the date
+  on submit would punish the 11:55 pm player. Source:
+  [What Time Does Wordle Reset? — Connections Hintz](https://www.connectionshintz.com/blog/what-time-wordle-reset).
+  This is already the architecture in `App.vue`: `startGame` captures
+  the date once into `game.value.date`, and `endGameWithResult` reads
+  `game.value.date` (not re-deriving). No code change needed for the
+  lock — only the helper changes from UTC to local.
+- **Migration from UTC keys to local keys**: cleanest pattern for an
+  early-stage app is "don't migrate, just orphan." Old UTC-keyed
+  records stay in localStorage harmlessly. The only risk is a single
+  day of "you already played" state being mis-attributed, which is
+  trivial. CLAUDE.md says YAGNI; we honour that. No migration code,
+  no `SCHEMA_VERSION` bump (the *value* of date keys changes
+  semantics, not the schema shape).
+- **Vitest + happy-dom Date mocking**: `vi.useFakeTimers()` to enable,
+  `vi.setSystemTime(new Date(2026, 3, 25, 12, 0, 0))` to set the
+  moment, `vi.useRealTimers()` in cleanup. The constructor form
+  `new Date(2026, 3, 25, 12, 0, 0)` is *local* midday Apr 25, 2026.
+  `new Date('2026-04-25')` is *UTC* midnight — would flake under
+  CI-vs-laptop TZ differences. Sources:
+  [Vitest: Mocking Dates](https://vitest.dev/guide/mocking/dates),
+  [Vitest: Timers](https://vitest.dev/guide/mocking/timers).
+
+### Decisions
+
+1. **Extract `todayLocal()` to `src/dateKey.js`** with a pure helper
+   `formatLocalDate(date)` it builds on. Keeping it in its own module
+   (rather than `storage.js`) reflects the dual purpose: same key
+   feeds both the PRNG seed (`prng.js`/`game.js`) and the storage
+   layer (`storage.js`). One source of truth so the seed and key
+   never drift.
+2. **App.vue** imports `todayLocal` and replaces `todayUTC()` callsites
+   inline. Function call shape unchanged. Lock-at-start is preserved
+   by the existing `startGame` → `game.value.date = ` pattern.
+3. **No migration**. Old UTC-keyed records in localStorage are
+   orphaned. For most users this is at most a one-day discrepancy
+   (UTC and local diverge on at most one calendar day per midnight
+   crossing) and only matters once.
+4. **No `SCHEMA_VERSION` bump**. The schema shape is unchanged; only
+   the *interpretation* of date keys flips from UTC to local. A
+   schema migration framework will land when the first genuinely
+   breaking shape change appears.
+5. **`shiftDate()` in `storage.js` stays as-is**. It uses `Date.UTC`
+   internally to step ±N days on a YYYY-MM-DD string and re-format.
+   The string itself is timezone-agnostic — UTC math here is just an
+   arithmetic stable point that avoids DST edge cases. Whether the
+   string came from UTC or local time doesn't matter.
+6. **`HomeScreen.vue` weekday/human-date helpers stay as-is.** They
+   parse fixed `YYYY-MM-DD` strings via `Date.UTC` and read
+   `getUTCDay()` / `toLocaleDateString({timeZone: 'UTC'})`. Same
+   reasoning: the input is just a calendar-date label; UTC parsing
+   gives a stable weekday. April 25 2026 is a Saturday no matter how
+   you slice the day.
+
+### Tests
+
+- **`tests/dateKey.test.js` (new)**: unit tests for `formatLocalDate`
+  (zero padding for single-digit month/day; full year regardless of
+  TZ) and `todayLocal` (uses `vi.setSystemTime` to pin a known local
+  moment, asserts the helper returns the local-calendar date).
+- **`tests/app.smoke.test.js`** "shows Streak and Best..." test:
+  switch from `new Date().toISOString().slice(0, 10)` (UTC) to
+  `vi.useFakeTimers()` + `vi.setSystemTime(new Date(2026, 3, 25, 12, 0, 0))`
+  + hardcoded `today = '2026-04-25'`, `yesterday = '2026-04-24'`. This
+  pins the test to a deterministic moment regardless of CI/laptop
+  timezone, and exercises the local-date code path. The other smoke
+  tests don't depend on date semantics, so they're unaffected.
+
+### Out of scope (intentional)
+
+- One-time read-side fallback for legacy UTC records. CLAUDE.md says
+  YAGNI; the orphan cost is one day of "you already played" state.
+- Mid-game date-rollover unit test. The lock-at-start invariant is
+  already structurally guaranteed by `App.vue`'s `game.value.date`
+  capture; an isolated test would require complex internal state
+  inspection for marginal value.
+- Switching `HomeScreen.vue` weekday/human-date helpers to local
+  parsing. They're consuming opaque YYYY-MM-DD labels and producing
+  human-readable strings; the UTC-parse trick produces the right
+  weekday in all timezones.

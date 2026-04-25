@@ -897,15 +897,96 @@ unaffected.
 - `npm run dev` — boots; HomeScreen popover now renders the Share
   button on played cells whose record has a non-empty `history`.
 
+### `feat/initial-game` — Local-midnight Daily Challenge reset (this commit)
+
+Switches the Daily Challenge puzzle seed and storage record key from
+UTC to the user's local-calendar date, so the puzzle resets at local
+midnight. Closes the open follow-up "Local-midnight reset for the
+Daily Challenge (industry consensus over UTC)." NYT Wordle, NYT
+Connections, and most daily-puzzle games follow this convention; the
+prior UTC behavior surprised users in non-UTC timezones (Pacific time
+saw the new puzzle at 5 PM the prior local day).
+
+#### What changed
+- `src/dateKey.js` (new) — single source of truth for the daily date
+  string. Exports `formatLocalDate(date)` (pure: `${y}-${pad(m+1)}-${
+  pad(d)}` from local-time accessors) and `todayLocal()` (returns
+  `formatLocalDate(new Date())`). Manual local-time formatting was
+  preferred over `toLocaleDateString('en-CA')` per
+  [tc39/ecma402#891](https://github.com/tc39/ecma402/issues/891) — for
+  a primary key, `Intl` is too clever.
+- `src/components/App.vue` — deleted the private `function todayUTC()
+  { return new Date().toISOString().slice(0, 10) }` and replaced both
+  callsites (`computeStats()` and `startGame()`) with `todayLocal()`
+  imported from `../dateKey.js`. Function-call shape unchanged. The
+  lock-at-game-start architecture (`game.value.date` captured once in
+  `startGame`) is preserved verbatim — a session that crosses local
+  midnight finishes on the date it began (Wordle convention).
+
+#### What did NOT change
+- `src/storage.js#shiftDate` continues to use `Date.UTC` math
+  internally. That is opaque-string `±N`-day arithmetic on a
+  `YYYY-MM-DD` label — timezone-agnostic, not a semantic UTC
+  commitment. Re-described in the noridocs to make this explicit.
+- `src/components/HomeScreen.vue#parseDate/weekdayLetter/humanDate`
+  continue to parse via `Date.UTC` for stable cross-TZ weekday
+  rendering. The input is just a calendar-date label.
+- No `SCHEMA_VERSION` bump. The schema *shape* is unchanged; only the
+  *interpretation* of date keys flips from UTC to local. A migration
+  framework will land when the first genuinely breaking shape change
+  appears (per the v11 RESEARCH-NOTES decision).
+- No migration code. Existing UTC-keyed records orphan harmlessly
+  (CLAUDE.md YAGNI; for most users the divergence is at most one
+  calendar day).
+
+#### Tests added
+- `tests/dateKey.test.js` (new) — 3 unit tests:
+  - `formatLocalDate` zero-pads single-digit months and days
+    (`new Date(2026, 0, 5, 12, 0, 0)` → `'2026-01-05'`).
+  - `formatLocalDate` formats end-of-year (`new Date(2026, 11, 31,
+    12, 0, 0)` → `'2026-12-31'`).
+  - `todayLocal` wired to system clock — `vi.setSystemTime(new
+    Date(2026, 3, 25, 12, 0, 0))` → `todayLocal()` returns
+    `'2026-04-25'`.
+- `tests/app.smoke.test.js` "shows Streak and Best..." — switched from
+  `new Date().toISOString().slice(0, 10)` (UTC) to
+  `vi.useFakeTimers()` + `vi.setSystemTime(new Date(2026, 3, 25, 12,
+  0, 0))` plus hardcoded `today = '2026-04-25'`/`yesterday =
+  '2026-04-24'`. CI-stable across host timezones; exercises the new
+  local-date path through the App boundary. Pinning to local-noon
+  keeps both UTC and local on the same calendar day in any reasonable
+  timezone, so the seed and the App's "today" agree.
+
+#### Documentation
+- `src/docs.md` — Determinism flow bullet now references
+  `src/dateKey.js`. Persistence-layer / `recentDays` bullets:
+  "consecutive UTC days" → "consecutive local-calendar days" and
+  clarification that `shiftDate` is opaque-string arithmetic.
+  Things-to-Know "Date string..." rewritten to reflect local-calendar
+  semantics, link to `src/dateKey.js`, call out the lock-at-start
+  pattern, and disclaim `shiftDate`'s UTC math as a stable-arithmetic
+  trick.
+- `src/components/docs.md` — App.vue date-convention bullet:
+  `todayUTC()` → `todayLocal()` from `src/dateKey.js`. HomeScreen
+  popover Share-button bullet: streak relative to "today's UTC date"
+  → "today's local-calendar date." Replays bullet: "same UTC day" →
+  "same local day."
+
+#### Verified
+- `npm test` — 179/179 passing (was 176; +3 dateKey tests). The smoke
+  test that was reworked still passes; no regressions elsewhere.
+- The lock-at-start invariant is structurally preserved by the
+  existing `App.vue` architecture (date captured once in `startGame`,
+  read from `game.value.date` thereafter); no new test was added for
+  it because verifying it requires reaching into component internals
+  for marginal value.
+
 ## Open follow-ups (next commits)
 
 - Sticky-claim or staged-array model so click-to-remove on duplicate
   leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not
   hit by typical games but possible.
-- Local-midnight reset for the Daily Challenge (industry consensus over
-  UTC). Currently UTC for parity with the existing puzzle seed; if we
-  move puzzle ID to local, the streak storage key follows automatically.
 - Score-tier color heatmap on calendar cells (currently boolean
   filled/hollow). Add only if play-tester feedback says scores are hard
   to interpret at a glance.

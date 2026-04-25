@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { readFileSync } from 'fs';
 import path from 'path';
@@ -34,6 +34,10 @@ beforeEach(() => {
     };
   })();
   vi.stubGlobal('localStorage', fakeStorage);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('App smoke', () => {
@@ -83,8 +87,10 @@ describe('App smoke', () => {
   });
 
   it('shows Streak and Best on the home screen when prior daily records exist', async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 25, 12, 0, 0));
+    const today = '2026-04-25';
+    const yesterday = '2026-04-24';
     const seeded = JSON.stringify({
       schemaVersion: 1,
       records: {
