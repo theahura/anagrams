@@ -360,12 +360,95 @@ so we precompute it offline.
 - `npm run build-lemmas` — regenerates `data/lemmas.json`
   deterministically from `data/dictionary.json` (offline).
 
+### `feat/initial-game` — Keyboard / accessibility pass (this commit)
+
+Closes the long-standing keyboard-reach gap on the rack and player-word
+list. Before this commit the game was completely unplayable by keyboard
+— tiles and word rows were `<span>` containers with
+`@mousedown.left.prevent` handlers, which fire only on pointer events.
+After this commit Tab + Enter/Space activates a tile, focus rings are
+visible against the dark theme, screen readers announce tile/word
+labels, and live regions announce submit results.
+
+#### New / changed
+- `src/components/GameScreen.vue`:
+  - Rack tile `<span>`s and player-word `<div>`s are now
+    `<button type="button">` elements with the same `.tile` /
+    `.word-row` classes preserved so visuals are unchanged.
+  - Each rack tile carries `aria-label="Tile {letter}"` (`…, claimed`
+    when in `consumption.loose`). Each word row carries
+    `aria-label="Word {word}, {N} letters"` (`…, claimed` when
+    consumed). Inner per-letter decoration `<span>`s inside a word-row
+    button are `aria-hidden="true"` so AT only reads the row's
+    aria-label, not the chopped-up letters.
+  - Staging logic moved from `@mousedown.left.prevent` to `@click`. A
+    no-op `@mousedown.prevent` is kept on these buttons solely to
+    suppress input blur on pointer click. Native button semantics now
+    handle keyboard activation (Enter on keydown, Space on keyup).
+  - New `inputRef` is bound on the typed `<input>`. After every
+    typed-mutating handler (`onTileClick`, `onWordClick`, `onClear`)
+    the input is programmatically refocused so keyboard users keep
+    typing without a manual Tab back.
+  - Live regions: `.feedback` carries `role="status" aria-atomic="true"`
+    and is rendered **unconditionally** (with empty text when no
+    submission has happened) so the live region exists in the DOM
+    before its content changes — some screen readers miss
+    announcements when the region is created simultaneously with its
+    text. The score is left as a static `<span>` (no live region) so
+    SR users get one announcement per submit (the feedback line),
+    not two; they can navigate to the score on demand. `#timer` gets
+    explicit `aria-live="off"` so per-second tick updates don't
+    spam screen readers.
+  - The typed `<input>` got an `id="word-input-field"` and a paired
+    visually-hidden `<label for="word-input-field" class="sr-only">
+    Type a word</label>` — replaces the placeholder-only a11y
+    anti-pattern.
+- `style.css`:
+  - `button.tile, button.word-row { appearance: none; … }` reset so
+    the new `<button>` form looks identical to the prior
+    `<span>`/`<div>` form. `button.word-row` additionally gets
+    background/border/color resets and `text-align: left` since
+    `<button>` defaults differ from `<div>`.
+  - `:focus-visible` rule covering `.tile`, `.word-row`, `.action-btn`,
+    `.mode-btn`: `outline: 3px solid #b59f3b; outline-offset: 2px;`
+    (#b59f3b vs `#121213` ≈ 5.4:1 contrast ratio, satisfying WCAG
+    2.4.11). No focus ring on mouse-only clicks (browsers handle
+    `:focus-visible` heuristics natively).
+  - `.sr-only` clip-path utility class for the visually-hidden input
+    label.
+- No domain-module changes (`game.js`, `scoring.js`, `pool.js`,
+  `staging.js`, `dictionary.js`, `anagramRules.js`, `share.js`,
+  `storage.js`, `trivialInflection.js` are untouched).
+
+#### Tests added / updated
+- `tests/gameScreenInteraction.test.js`:
+  - Existing 14 click-to-stage tests retargeted from `trigger('mousedown')`
+    to `trigger('click')` (matching the new event wiring; user-visible
+    behavior unchanged).
+  - New `describe('GameScreen accessibility', …)` block, 9 tests:
+    each rack tile is a `<button type="button">`; each tile has an
+    aria-label naming its letter; each word row is a button; each row
+    has an aria-label naming the word; the typed input has an
+    associated label (visible / hidden / aria-label); the feedback box
+    has `role="status"` after a submission; the score region has
+    `role="status"`; the timer has `aria-live="off"`; clicking a tile
+    leaves focus on the typed input element (`document.activeElement`
+    invariant, mounted with `attachTo: document.body`).
+- `tests/app.smoke.test.js`:
+  - Existing tile-click smoke retargeted from `mousedown` to `click`.
+
+#### Verified
+- `npm test` — 141/141 passing (was 132; +9 new).
+- `npm run build` — production bundle builds in 0.6 s, JS ≈ 94 kB raw
+  / 36 kB gzipped (CSS now 6.97 kB, was 6.54 kB; +0.4 kB for the new
+  rules).
+- `npm run dev` — boots; Vite serves the new `aria-label`,
+  `:focus-visible`, and `.sr-only` rules. End-to-end keyboard /
+  screen-reader interaction not driven from CLI; tested at the
+  component-DOM level by the test suite.
+
 ## Open follow-ups (next commits)
 
-- A11y pass: keyboard navigation, focus rings, ARIA on tile rack;
-  switch click handlers from `@mousedown.left.prevent` to `@click`
-  (with `@mousedown.prevent` only for focus-suppression) so keyboard
-  activation works.
 - Sticky-claim or staged-array model so click-to-remove on duplicate
   leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not
@@ -375,3 +458,8 @@ so we precompute it offline.
   move puzzle ID to local, the streak storage key follows automatically.
 - Past-scores list / 7-day calendar grid on the home screen.
 - Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
+- `prefers-reduced-motion` honouring on the tile pop-in animation.
+- A11y polish round 2: keyboard activation tests in a real browser
+  (Playwright) instead of happy-dom; live-region announcements verified
+  against an actual screen reader; reduce score-region announcement
+  cadence if play-tester feedback says it's chatty.

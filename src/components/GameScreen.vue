@@ -14,7 +14,22 @@ const game = ref(props.initialGame);
 const typed = ref('');
 const feedback = ref(null);
 const elapsedMs = ref(0);
+const inputRef = ref(null);
 let timerHandle = null;
+
+function refocusInput() {
+  inputRef.value?.focus();
+}
+
+function tileLabel(letter, i) {
+  const claimed = consumption.value.loose.has(i) ? ', claimed' : '';
+  return `Tile ${letter}${claimed}`;
+}
+
+function wordLabel(w, i) {
+  const claimed = consumption.value.words.has(i) ? ', claimed' : '';
+  return `Word ${w.word}, ${w.word.length} letters${claimed}`;
+}
 
 const score = computed(() =>
   finalScore({
@@ -53,6 +68,7 @@ function onTileClick(i) {
     typed.value += looseLetters.value[i];
   }
   clearFeedback();
+  refocusInput();
 }
 
 function onWordClick(i) {
@@ -62,11 +78,13 @@ function onWordClick(i) {
     typed.value += playerWords.value[i].word;
   }
   clearFeedback();
+  refocusInput();
 }
 
 function onClear() {
   typed.value = '';
   clearFeedback();
+  refocusInput();
 }
 
 function tick() {
@@ -149,36 +167,45 @@ function formatTime(ms) {
   <section class="game">
     <div class="game-info">
       <span class="meta">{{ game.mode === 'daily' ? `Daily ${game.date}` : 'Random' }}</span>
-      <span id="timer">{{ formatTime(elapsedMs) }}</span>
+      <span id="timer" aria-live="off">{{ formatTime(elapsedMs) }}</span>
       <span class="score">Score: {{ score }}</span>
     </div>
 
     <div class="section-label">Face-up tiles · {{ faceDownCount }} face-down</div>
     <div class="tile-rack">
-      <span
+      <button
         v-for="(letter, i) in looseLetters"
         :key="`l${i}`"
+        type="button"
         :class="['tile', 'offered', 'clickable', { used: consumption.loose.has(i) }]"
-        @mousedown.left.prevent="onTileClick(i)"
-      >{{ letter }}</span>
+        :aria-label="tileLabel(letter, i)"
+        @mousedown.prevent
+        @click="onTileClick(i)"
+      >{{ letter }}</button>
       <span v-if="looseLetters.length === 0" class="empty-note">No tiles yet — draw to start.</span>
     </div>
 
     <div class="section-label">Your words</div>
     <div class="words-list">
       <div v-if="playerWords.length === 0" class="empty-note">No words yet.</div>
-      <div
+      <button
         v-for="(w, i) in playerWords"
         :key="`w${i}`"
+        type="button"
         :class="['word-row', 'clickable', { consumed: consumption.words.has(i) }]"
-        @mousedown.left.prevent="onWordClick(i)"
+        :aria-label="wordLabel(w, i)"
+        @mousedown.prevent
+        @click="onWordClick(i)"
       >
-        <span v-for="(ch, j) in w.word.split('')" :key="`c${j}`" class="tile">{{ ch }}</span>
-      </div>
+        <span v-for="(ch, j) in w.word.split('')" :key="`c${j}`" class="tile" aria-hidden="true">{{ ch }}</span>
+      </button>
     </div>
 
     <form class="word-input" @submit.prevent="onSubmit">
+      <label for="word-input-field" class="sr-only">Type a word</label>
       <input
+        id="word-input-field"
+        ref="inputRef"
         v-model="typed"
         class="text-input"
         placeholder="Type a word…"
@@ -191,8 +218,13 @@ function formatTime(ms) {
       <button type="submit" class="action-btn primary">Submit</button>
     </form>
 
-    <div v-if="feedback" :class="['feedback', feedback.type]">
-      {{ feedback.text }}
+    <div
+      class="feedback"
+      :class="feedback ? feedback.type : 'feedback-empty'"
+      role="status"
+      aria-atomic="true"
+    >
+      {{ feedback ? feedback.text : '' }}
     </div>
 
     <div class="game-actions">

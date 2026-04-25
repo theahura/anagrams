@@ -59,7 +59,7 @@ describe('App smoke', () => {
 
     const tiles = wrapper.findAll('.tile-rack .tile');
     expect(tiles.length).toBe(3);
-    await tiles[0].trigger('mousedown');
+    await tiles[0].trigger('click');
 
     const input = wrapper.find('input.text-input');
     expect(input.element.value.length).toBe(1);

@@ -83,6 +83,40 @@ header h1 {
   border-radius: 2px;
 }
 
+button.tile,
+button.word-row {
+  appearance: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.word-row {
+  background: transparent;
+  color: inherit;
+  border: 0;
+  text-align: left;
+}
+
+.tile:focus-visible,
+.word-row:focus-visible,
+.action-btn:focus-visible,
+.mode-btn:focus-visible {
+  outline: 3px solid #b59f3b;
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
 .tile.offered {
   border-color: #565758;
 }
@@ -274,6 +308,12 @@ header h1 {
   border-radius: 4px;
   font-size: 14px;
   margin-bottom: 8px;
+}
+
+.feedback.feedback-empty {
+  padding: 0;
+  margin: 0;
+  border: 0;
 }
 
 .feedback.success {

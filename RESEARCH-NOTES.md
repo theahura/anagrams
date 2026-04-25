@@ -536,3 +536,148 @@ submits a word that consumes a parent word.
   regressions appear.
 - Moving `FORCE_NON_TRIVIAL` to build time. Negligible runtime cost,
   better git diffability at runtime.
+
+## Accessibility / keyboard pass (v7 commit)
+
+Open follow-up #1 from CURRENT-PROGRESS.md: keyboard navigation,
+focus rings, ARIA on tile rack; switch click handlers from
+`@mousedown.left.prevent` to a separation that makes keyboard
+activation work. Current state: `GameScreen.vue` uses
+`@mousedown.left.prevent="onTileClick(i)"` on `<span>` tiles and
+word rows. This fires only on pointer events — keyboard users
+cannot tab to tiles, cannot fire Enter / Space, see no focus ring,
+and AT sees opaque `<span>` elements with no role.
+
+### Findings (research summary)
+
+- **Native `<button>` over `role="button" tabindex="0"`** (MDN /
+  WAI-ARIA APG). Native button gets focus, keyboard activation
+  (Enter on keydown, Space on keyup), role and disabled state for
+  free. CSS reset cost is trivial; manual keydown handlers are
+  error-prone (Space-scrolls-page, key-repeat handling, focus
+  state).
+- **`@mousedown.prevent` is the standard pattern** to suppress
+  focus transfer on pointer click while keeping `@click` firing.
+  Keyboard activation routes through Tab + Enter/Space → native
+  `<button>` synthesises a click. After keyboard activation,
+  programmatically refocus the typed `<input>` so the player can
+  keep typing.
+- **Live regions**: `role="status" aria-atomic="true"` on the
+  feedback box (so "Played 'word'" / "Not in dictionary" announces
+  politely as one unit). Score may also be `role="status"` — submits
+  are infrequent and user-initiated, so chatty risk is low. Timer
+  must be `aria-live="off"` (per-second updates would spam every
+  screen reader).
+- **Input labelling**: bare `<input>` with placeholder is an a11y
+  anti-pattern. Use a visually-hidden `<label for=...>` with the
+  standard sr-only utility class. `aria-label` is acceptable but
+  visible/hidden label is more robust on mobile and translation.
+- **Focus ring on dark theme**: WCAG 2.4.11 needs ≥3:1 contrast.
+  Browser default rings disappear against `#121213`. Use
+  `:focus-visible` (Baseline 2022, no polyfill needed) with a
+  bright outline (e.g. `outline: 3px solid #b59f3b` —
+  `#b59f3b` vs `#121213` ≈ 5.4:1 ✓) and `outline-offset: 2px` so
+  the ring sits outside tile borders.
+- **Vue 3 keyboard**: `.enter` and `.space` modifiers map to
+  `KeyboardEvent.key` values `'Enter'` / `' '`. Modern browsers
+  no longer emit legacy `'Spacebar'`, so the modifiers are safe.
+  But since we are switching to native `<button>`, we don't need
+  any keydown handlers — the browser handles activation.
+- **Vue Test Utils gotcha**: `wrapper.trigger('keydown.enter')` on
+  a `<button>` does NOT synthesise a `click` in happy-dom. So
+  keyboard-activation tests should `trigger('keydown', { key:
+  'Enter' })` AND independently `trigger('click')` — or, more
+  robustly, just assert that the button is keyboard-reachable
+  (has `type="button"`, is not `aria-hidden`, is not
+  `disabled`) and rely on native browser semantics for the
+  activation itself. We will go with the second pattern: assert
+  structural accessibility (role, tabindex/native-button, accessible
+  name) and assert click-fires-handler. End-to-end keyboard is
+  better verified in a real browser than in happy-dom.
+
+### Decisions
+
+1. **Convert tile and word-row spans → `<button type="button">`**
+   in `GameScreen.vue`. Keep their visual styling (`.tile` /
+   `.word-row` classes) so look-and-feel is unchanged. Add a
+   `.tile.button-reset` (or simply target `button.tile`) CSS rule
+   to neutralise native button styling (`appearance: none;
+   background: inherit; padding: 0; font: inherit; color: inherit;
+   border: …` already covered by `.tile`).
+2. **Keep `@mousedown.prevent` on `mousedown`** to suppress input
+   blur on pointer clicks. Move the staging logic to `@click` so
+   keyboard Enter/Space (which native buttons fire as click) also
+   triggers it.
+3. **Refocus the typed `<input>` after a successful tile/word
+   click** so keyboard users can keep typing without a manual Tab
+   back. Add a `ref` on the input; call `inputRef.value?.focus()`
+   in `onTileClick` and `onWordClick` (and on `onClear`).
+4. **Accessible names**: each tile button gets `aria-label="Tile
+   {letter}"` (or `… (claimed)` when in `consumption.loose`). Each
+   word row button gets `aria-label="Word {word}, {N} letters"` (or
+   `… (claimed)` when in `consumption.words`). The submit button
+   keeps its "Submit" text label; the input gets a visually-hidden
+   `<label for="word-input-field">Type a word</label>`.
+5. **Live regions**:
+   - `<div class="feedback" role="status" aria-atomic="true">`,
+     rendered **unconditionally** (empty text when no submission has
+     happened). Reason: some AT (JAWS, older VoiceOver) miss
+     announcements when the live region is created at the same time
+     as its content. Region-exists-first-then-content-changes is the
+     reliable pattern. The empty state is styled to take no visual
+     space via a `.feedback.feedback-empty` class.
+   - `.score` is **not** a live region. With both `.feedback` and
+     `.score` as `role="status"`, every successful submit triggers
+     two competing announcements (the message + the score change).
+     Drop the `.score` live region; SR users navigate to it on
+     demand. The score change is implicit in the feedback text the
+     user just heard.
+   - `<span id="timer" aria-live="off">…</span>` to be explicit
+     (default for non-region elements is also off, but explicit
+     beats implicit here).
+6. **Focus ring CSS**: add a `:focus-visible` rule for tiles, word
+   rows, and existing `.action-btn` / `.mode-btn`. Use the existing
+   `#b59f3b` (Wordle-yellow accent already in palette) for
+   visibility on dark background.
+7. **No domain-module changes**. Pure UI / template / CSS pass.
+8. **Update existing `gameScreenInteraction.test.js` tests** that
+   currently `trigger('mousedown')` to `trigger('click')`.
+   `mousedown.prevent` no longer fires the staging logic — `click`
+   does. Same observable behavior for users (mouse click still
+   fires both events in sequence in real browsers); tests have to
+   match the new wiring.
+
+### Tests (new + updated)
+
+- Update existing `tests/gameScreenInteraction.test.js` (14 tests)
+  to use `trigger('click')` in place of `trigger('mousedown')`. No
+  behavioral change for users; just matches new event wiring.
+- Add to `tests/gameScreenInteraction.test.js` (a11y assertions):
+  - face-up tile is rendered as a `<button type="button">`;
+  - face-up tile carries an `aria-label` like `Tile c` (or `Tile c
+    (claimed)` when in consumption);
+  - word-row is rendered as a `<button>` with an `aria-label` like
+    `Word rook` (or `Word rook (claimed)`);
+  - typed input has an associated label (`<label for=…>` or
+    `aria-label`);
+  - feedback box has `role="status"`;
+  - score span has `role="status"`;
+  - timer has `aria-live="off"`;
+  - clicking a tile refocuses the typed input (assert
+    `document.activeElement === input.element`).
+- Add to `tests/app.smoke.test.js`: smoke that the page has a
+  visually-hidden label for the input AND that pressing the
+  rendered tile button (via `click`) appends a letter to the input,
+  end-to-end.
+
+### Out of scope (intentional)
+
+- Sticky-claim / staged-array model for duplicate-leftmost
+  highlight artifact (open follow-up #2; this commit only restores
+  keyboard reach).
+- Reduced-motion media query honouring on the pop-in animation —
+  cheap to add but a separate concern.
+- High-contrast media query — palette is already high-contrast on
+  dark.
+- Live focus management on Submit success / Draw button enable
+  changes (not needed for the rack-keyboard primary fix).

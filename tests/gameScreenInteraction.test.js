@@ -40,7 +40,7 @@ describe('GameScreen click-to-stage interactions', () => {
     });
 
     const tiles = wrapper.findAll('.tile-rack .tile');
-    await tiles[0].trigger('mousedown');
+    await tiles[0].trigger('click');
 
     const input = wrapper.find('input.text-input');
     expect(input.element.value).toBe('c');
@@ -55,7 +55,7 @@ describe('GameScreen click-to-stage interactions', () => {
     });
 
     const wordRows = wrapper.findAll('.word-row');
-    await wordRows[0].trigger('mousedown');
+    await wordRows[0].trigger('click');
 
     const input = wrapper.find('input.text-input');
     expect(input.element.value).toBe('rook');
@@ -67,8 +67,8 @@ describe('GameScreen click-to-stage interactions', () => {
     });
 
     const tiles = wrapper.findAll('.tile-rack .tile');
-    await tiles[0].trigger('mousedown');
-    await tiles[2].trigger('mousedown');
+    await tiles[0].trigger('click');
+    await tiles[2].trigger('click');
 
     const input = wrapper.find('input.text-input');
     expect(input.element.value).toBe('ct');
@@ -127,7 +127,7 @@ describe('GameScreen click-to-stage interactions', () => {
     await input.setValue('cat');
 
     const tiles = wrapper.findAll('.tile-rack .tile');
-    await tiles[1].trigger('mousedown');
+    await tiles[1].trigger('click');
 
     expect(input.element.value).toBe('ct');
   });
@@ -144,7 +144,7 @@ describe('GameScreen click-to-stage interactions', () => {
     await input.setValue('brook');
 
     const wordRows = wrapper.findAll('.word-row');
-    await wordRows[0].trigger('mousedown');
+    await wordRows[0].trigger('click');
 
     expect(input.element.value).toBe('b');
   });
@@ -161,7 +161,7 @@ describe('GameScreen click-to-stage interactions', () => {
     await input.setValue('barook');
 
     const wordRows = wrapper.findAll('.word-row');
-    await wordRows[0].trigger('mousedown');
+    await wordRows[0].trigger('click');
 
     expect(input.element.value).toBe('ba');
   });
@@ -175,7 +175,7 @@ describe('GameScreen click-to-stage interactions', () => {
     await input.setValue('CAT');
 
     const tiles = wrapper.findAll('.tile-rack .tile');
-    await tiles[1].trigger('mousedown');
+    await tiles[1].trigger('click');
 
     expect(input.element.value).toBe('CT');
   });
@@ -189,7 +189,7 @@ describe('GameScreen click-to-stage interactions', () => {
     await input.setValue('a');
     expect(wrapper.findAll('.tile-rack .tile')[1].classes()).toContain('used');
 
-    await wrapper.findAll('.tile-rack .tile')[1].trigger('mousedown');
+    await wrapper.findAll('.tile-rack .tile')[1].trigger('click');
     expect(wrapper.findAll('.tile-rack .tile')[1].classes()).not.toContain('used');
   });
 
@@ -227,5 +227,110 @@ describe('GameScreen click-to-stage interactions', () => {
 
     const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
     expect(clearBtn.attributes('disabled')).toBeUndefined();
+  });
+});
+
+describe('GameScreen accessibility', () => {
+  it('renders each face-up tile as a button element with type=button', () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const tiles = wrapper.findAll('.tile-rack .tile');
+    expect(tiles).toHaveLength(3);
+    for (const tile of tiles) {
+      expect(tile.element.tagName).toBe('BUTTON');
+      expect(tile.attributes('type')).toBe('button');
+    }
+  });
+
+  it('marks a tile as "claimed" in its aria-label when the typed input claims it', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('a');
+
+    const tiles = wrapper.findAll('.tile-rack .tile');
+    expect(tiles[1].attributes('aria-label')).toBe('Tile a, claimed');
+    expect(tiles[0].attributes('aria-label')).toBe('Tile c');
+  });
+
+  it('renders each word row as a button', () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: [], words: ['rook', 'cat'] }),
+        dict,
+      },
+    });
+
+    const wordRows = wrapper.findAll('.word-row');
+    expect(wordRows).toHaveLength(2);
+    for (const row of wordRows) {
+      expect(row.element.tagName).toBe('BUTTON');
+      expect(row.attributes('type')).toBe('button');
+    }
+  });
+
+  it('marks a word row as "claimed" in its aria-label when the typed input fully covers it', async () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: [], words: ['rook'] }),
+        dict,
+      },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('rook');
+
+    const row = wrapper.find('.word-row');
+    expect(row.attributes('aria-label')).toBe('Word rook, 4 letters, claimed');
+  });
+
+  it('typed input has an associated accessible name', () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    const inputId = input.attributes('id');
+    const ariaLabel = input.attributes('aria-label');
+    const ariaLabelledby = input.attributes('aria-labelledby');
+
+    const hasAriaLabel = !!(ariaLabel && ariaLabel.trim().length > 0);
+    const hasLabelFor =
+      !!inputId && wrapper.find(`label[for="${inputId}"]`).exists();
+    const hasLabelledby =
+      !!ariaLabelledby && wrapper.find(`#${ariaLabelledby}`).exists();
+
+    expect(hasAriaLabel || hasLabelFor || hasLabelledby).toBe(true);
+  });
+
+  it('feedback live region exists before any submission so screen readers can announce it', () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.exists()).toBe(true);
+    expect(feedback.attributes('role')).toBe('status');
+  });
+
+  it('clicking a face-up tile leaves focus on the typed input', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+      attachTo: document.body,
+    });
+
+    const input = wrapper.find('input.text-input');
+    input.element.focus();
+    expect(document.activeElement).toBe(input.element);
+
+    const tiles = wrapper.findAll('.tile-rack .tile');
+    await tiles[0].trigger('click');
+
+    expect(document.activeElement).toBe(input.element);
+    wrapper.unmount();
   });
 });
