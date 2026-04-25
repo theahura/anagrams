@@ -523,6 +523,78 @@ schema change.
   rules. Verified via the test suite at component-DOM level; full
   end-to-end manual click-through not run from CLI.
 
+### `feat/initial-game` — `prefers-reduced-motion` honouring (this commit)
+
+Closes the open follow-up "`prefers-reduced-motion` honouring on the
+tile pop-in animation." Adds a single `@media (prefers-reduced-motion:
+reduce)` block to `style.css` that neutralises the rack tile pop-in
+keyframe, the `.tile.clickable:hover` translate, and all the short
+transitions on tiles, word rows, action buttons, and mode buttons —
+honouring WCAG 2.3.3 (Animation from Interactions, Level AAA;
+sufficient technique W3C C39). Pure CSS commit; no JS, no Vue
+templates, no domain modules, no new dependencies.
+
+#### What changed
+- `style.css` — appended a `@media (prefers-reduced-motion: reduce)`
+  block at the end of the file. Two rules:
+  1. A universal-selector reset (`*, *::before, *::after`) setting
+     `animation-duration: 0.01ms !important`,
+     `animation-iteration-count: 1 !important`, and
+     `transition-duration: 0.01ms !important`. Using `0.01ms` (not
+     `0` / `none`) preserves `animationend` / `transitionend` event
+     firing for any future JS that might depend on them.
+     `animation-iteration-count: 1 !important` is included even
+     though we have no infinite animations today: an infinite
+     animation reduced to `0.01ms` duration still loops on the event
+     loop, so capping iterations is the canonical safety belt.
+  2. A targeted `.tile.clickable:hover { transform: none; }` rule.
+     Without this, the universal `transition-duration` reset alone
+     would still let the element *snap* to `translateY(-1px)` on
+     hover — visible 1 px jump. The targeted override removes the
+     end state entirely.
+- `tests/reducedMotion.test.js` (new) — 5 tests that read `style.css`
+  as text and assert (a) the `@media (prefers-reduced-motion:
+  reduce)` block exists; (b) inside it: `animation-duration: 0.01ms
+  !important`, `animation-iteration-count: 1 !important`,
+  `transition-duration: 0.01ms !important`; (c) inside it:
+  `.tile.clickable:hover { … transform: none … }`. The block is
+  isolated via brace-counting so the assertions only match content
+  inside the media block. Headless DOMs (jsdom, happy-dom) do not
+  evaluate `@media (prefers-reduced-motion)` against any system
+  setting, so direct DOM-computed-style tests are not viable —
+  text-inspection of the CSS file is the W3C / CSS-Tricks consensus
+  pattern for plain CSS. (Verified independently by the
+  knowledge-researcher subagent.)
+- `src/components/docs.md` — extended the "Live-region policy in
+  `GameScreen`" bullet's enumeration of what `style.css` hosts to
+  include the new `prefers-reduced-motion` block, with the rationale
+  (`0.01ms` vs `none`, hover-transform-none follow-up, keyframes
+  preserved for users without the OS preference).
+
+#### What did NOT change
+- No JS files, no `.vue` templates.
+- No domain modules.
+- No `package.json`, no new dependencies.
+- No keyframe rules deleted. The `@keyframes pop-in` definition
+  remains; users without the OS preference still see the animation.
+- No existing tests changed. Cascade order is preserved (the new
+  block is appended after every existing rule).
+
+#### Verified
+- `npm test` — 154/154 passing (was 149; +5 new reducedMotion).
+- `npm run build` — production bundle builds cleanly in 0.66 s.
+  CSS now 7.80 kB (was 7.57 kB; +0.23 kB for the new block); JS
+  unchanged at ≈95 kB raw / 36.86 kB gzipped.
+- End-to-end OS-level reduced-motion behavior was not driven from
+  CLI; it is verifiable in Chrome DevTools → Rendering → "Emulate
+  CSS media feature `prefers-reduced-motion`."
+
+#### Reviewer parity note
+- An earlier draft of the block also included `scroll-behavior: auto
+  !important`, recommended by web.dev. Dropped before commit because
+  the codebase declares no `scroll-behavior: smooth` anywhere — the
+  reset would be dead code. YAGNI.
+
 ## Open follow-ups (next commits)
 
 - Sticky-claim or staged-array model so click-to-remove on duplicate
@@ -539,7 +611,6 @@ schema change.
   duration, share-text replay). Currently cells are non-interactive —
   tooltip + screen-reader label is the only disclosure.
 - Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
-- `prefers-reduced-motion` honouring on the tile pop-in animation.
 - A11y polish round 2: keyboard activation tests in a real browser
   (Playwright) instead of happy-dom; live-region announcements verified
   against an actual screen reader; reduce score-region announcement

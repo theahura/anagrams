@@ -827,3 +827,123 @@ used by daily-puzzle games.
   agenda."
 - Streak protection / freeze tokens, longest-word "best",
   past-month grid view. All deferred.
+
+## prefers-reduced-motion honouring (v9 commit)
+
+Open follow-up from CURRENT-PROGRESS.md: "`prefers-reduced-motion`
+honouring on the tile pop-in animation." Continues the v7 a11y track:
+v7 covered keyboard reach + ARIA + focus rings; this commit covers
+WCAG 2.3.3 (Animation from Interactions, Level AAA — the official
+sufficient technique is W3C C39, "Using the CSS prefers-reduced-motion
+query to prevent motion").
+
+### Findings (knowledge-researcher summary)
+
+- **WCAG mapping**: 2.3.3 is **AAA**, not AA, and applies to non-
+  essential **motion** animations (transforms creating apparent
+  motion: scale/translate/rotate/parallax). 2.2.2 Pause/Stop/Hide
+  (Level A) targets long-running >5 s motion and is irrelevant to a
+  0.18 s tile pop-in.
+- **Heavy hammer vs targeted**: 2024-2026 consensus is *both*. Apply
+  the canonical reset block as a global safety net (catches new
+  rules added later, third-party CSS, etc.) AND add targeted
+  overrides for `transform`-on-hover rules where the transition kill
+  alone is insufficient — without `transform: none`, the element
+  *still* jumps to the new transform, only without the animation.
+- **Use `0.01ms`, not `0` or `none`** so `transitionend` /
+  `animationend` events still fire for any JS that might depend on
+  them. This is the well-known reason the canonical block uses
+  near-zero rather than disabling outright. We have no JS animation
+  callbacks today, but futureproofing is free here.
+- **Keep `animation-iteration-count: 1 !important`** in the block.
+  An infinite animation reduced to 0.01 ms duration *still loops*
+  on the event loop, causing CPU spin and event flooding. Capping
+  iterations at 1 prevents this. Keep it even though we have no
+  infinite animations today.
+- **Preserve color/background/opacity transitions** in spirit — the
+  W3C definition of "motion animation" excludes these. But because
+  our codebase uses `transition: all 0.15s ease` shorthand on
+  `.action-btn` and `.mode-btn` (which include transforms via
+  hover), we cannot cleanly separate motion from non-motion in the
+  shorthand. The `0.01ms` reset preserves *event firing* while
+  making the motion imperceptible — color changes are nearly-instant
+  but still trigger transitionend.
+- **Testing in Vitest/happy-dom**: jsdom and happy-dom **do not**
+  evaluate `@media` queries against system settings; `matchMedia`
+  returns `matches: false` (or undefined and must be mocked). The
+  consensus pattern for plain CSS is to read the file as text and
+  assert via regex/substring that the expected `@media (prefers-
+  reduced-motion: reduce)` block is present and contains the
+  expected reset rules. There is no `jest-styled-components`
+  equivalent for plain CSS — text inspection is the standard.
+- **Vite gotchas**: none. Vite dev server respects the OS setting;
+  we can verify in Chrome DevTools → Rendering → "Emulate CSS media
+  feature prefers-reduced-motion." Browser support universal since
+  2020 ([caniuse](https://caniuse.com/prefers-reduced-motion)).
+
+### Sources
+
+- [W3C Understanding SC 2.3.3](https://www.w3.org/WAI/WCAG21/Understanding/animation-from-interactions.html)
+- [W3C C39 Sufficient Technique](https://www.w3.org/WAI/WCAG21/Techniques/css/C39)
+- [MDN: prefers-reduced-motion](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion)
+- [web.dev: prefers-reduced-motion](https://web.dev/articles/prefers-reduced-motion)
+- [Pope Tech: Design accessible animation (2025)](https://blog.pope.tech/2025/12/08/design-accessible-animation-and-movement/)
+- [Christian Heilmann: Testing for reduced-motion](https://christianheilmann.com/2020/06/26/testing-your-animations-for-prefers-reduced-motion-support/)
+- [Andy Bell: Modern CSS reset](https://piccalil.li/blog/a-more-modern-css-reset/)
+
+### Decisions
+
+1. **Append a single `@media (prefers-reduced-motion: reduce)`
+   block** to `style.css`. No new files, no JS. Pure CSS.
+2. **Block contents**:
+   ```css
+   @media (prefers-reduced-motion: reduce) {
+     *,
+     *::before,
+     *::after {
+       animation-duration: 0.01ms !important;
+       animation-iteration-count: 1 !important;
+       transition-duration: 0.01ms !important;
+     }
+     .tile.clickable:hover { transform: none; }
+   }
+   ```
+   `scroll-behavior: auto !important` was *considered* per web.dev
+   guidance but dropped per YAGNI: the codebase declares no
+   `scroll-behavior: smooth` anywhere, so the reset would be dead
+   code.
+3. **Hover transform override is `.tile.clickable:hover`** (not just
+   `.tile:hover`) because the `translateY(-1px)` is scoped to that
+   selector at line 137-140. Matching the original specificity
+   avoids over-reach.
+4. **No keyframe rewrites**. The `pop-in` animation will run for
+   0.01 ms — visually instant — and we do not need to also delete
+   the keyframe rule. Keeping the keyframe present means the
+   non-reduced-motion path is unchanged.
+5. **No domain-module changes**. Pure CSS; no JS / Vue templates /
+   game logic touched.
+
+### Tests
+
+- **New `tests/reducedMotion.test.js`**: read `style.css` as text
+  and assert:
+  - the `@media (prefers-reduced-motion: reduce)` block exists;
+  - inside it: universal-selector reset rule includes
+    `animation-duration: 0.01ms !important`,
+    `animation-iteration-count: 1 !important`,
+    `transition-duration: 0.01ms !important`;
+  - inside it: `.tile.clickable:hover` rule contains
+    `transform: none`.
+- **No changes** to existing tests. The block is appended after all
+  existing rules, so cascade order is preserved and current visual
+  / interaction tests don't see any change.
+
+### Out of scope (intentional)
+
+- Per-keyframe rewrites (e.g., a separate reduced-motion `pop-in`
+  fade-only keyframe). The canonical reset is enough.
+- JS-level reduced-motion gating (no JS animation callbacks today).
+- `prefers-contrast` / `prefers-color-scheme` honouring (separate
+  concerns; the palette is already dark).
+- Real-browser keyboard / live-region a11y verification — that's
+  the separate "A11y polish round 2" follow-up.
