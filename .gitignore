@@ -1,0 +1,6 @@
+.venv/
+node_modules/
+.worktrees/
+data/web-cache.json
+.claude
+.codex
