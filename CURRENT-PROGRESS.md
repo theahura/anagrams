@@ -698,21 +698,84 @@ storage schema change.
   rules); JS at 100.98 kB raw / 39.03 kB gzipped (was 100.89 kB
   / 39.00 kB; +0.1 kB for the popover state machine).
 
+### `feat/initial-game` — Reject pure-rearrangement of existing words (this commit)
+
+Closes the headline bug from the previous WIP note: `side → dies →
+side → dies …` was a legal infinite loop because `canFormWord` only
+rejected exact replay, not same-length rearrangement of a single
+consumed parent. The fix replaces the string-equality replay check
+with a more general **max-parent-length growth check** that subsumes
+both cases. Independently confirmed against the canonical Snatch /
+Anagrams rule (Wikipedia, Bananagrammer, BoardGameGeek): every steal
+must add at least one tile from the pool.
+
+#### What changed
+- `src/anagramRules.js` — `canFormWord` now rejects with reason
+  `'no-new-play'` whenever `consumedWords.length > 0 && typed.length
+  <= max(parent.length)`. Replaces the previous
+  `consumedWords.includes(word)` exact-replay check, which it
+  subsumes (replay = same word, same length, single parent). No new
+  failure code; no signature change; failure-priority table
+  unchanged.
+- `src/components/GameScreen.vue` — `reasonText('no-new-play')`
+  message broadened from "That is the same word that is already on
+  the table." to "You must add at least one new letter when using an
+  existing word." (single message covers both replay and
+  rearrangement cases).
+- No domain-module signature changes. No CSS, no storage, no
+  dictionary, no lemma changes. No new dependencies.
+
+#### Why it's a one-line rule
+- **Loose-only draws** (no parents): rule guarded off by
+  `consumedWords.length > 0`.
+- **Single-parent + loose growth** (`nub + s → snub`): typed.length
+  4 > parent.length 3 — passes.
+- **Multi-parent merges** (`res + side → resides`): typed.length
+  7 > max(3, 4) — passes. In general, ≥2 parents force `typed.length
+  ≥ Σ parent_lengths ≥ max_parent_length + min_other_parent_length ≥
+  max + 3 > max`, so multi-parent always passes.
+- **Same-length single-parent rearrangement** (`side → dies`):
+  typed.length 4 ≤ max parent length 4 — rejected. (NEW.)
+- **Exact replay** (`rook → rook`): typed.length 4 ≤ 4 — rejected.
+  (Same outcome as before, narrower check.)
+
+#### Tests added
+- `tests/anagramRules.test.js`:
+  - `rejects same-length single-parent rearrangement (dies from
+    side)` — headline bug regression. Asserts
+    `{ ok: false, reason: 'no-new-play' }`.
+  - The pre-existing replay-rejection test (`rook from rook with no
+    new letters`) was sharpened to also assert
+    `reason === 'no-new-play'`, locking the new code path's behavior
+    on the replay subcase.
+  - `accepts a multi-parent merge that exceeds the longest parent
+    (trains from rat + sin)` — locks the load-bearing invariant that
+    the growth check never accidentally rejects multi-parent
+    merges. Previously untested at the `canFormWord` level.
+- All existing positive tests (`brook from rook + b`, `snub from nub
+  + s`, `redefine from refine + d + e`) act as regression coverage
+  and continue to pass.
+
+#### Documentation
+- `src/docs.md` — updated the "Word legality" bullet to describe the
+  broadened semantics of the `'no-new-play'` reason: covers any
+  consume-without-growth play (replay or same-length single-parent
+  rearrangement); multi-parent merges always pass.
+- `RESEARCH-NOTES.md` — appended a "Pure-rearrangement bug fix"
+  section with the canonical-rule citations, decision rationale, and
+  out-of-scope notes (the stricter "must rearrange ≥2 parent tiles"
+  variant is rejected because the spec accepts `Nub + S → Snub`).
+
+#### Verified
+- `npm test` — 168/168 passing (was 166; +2 new tests, +1 sharpened
+  existing test asserting the reason code).
+- `npm run build` — production bundle builds cleanly. No bundle-size
+  change (one-line logic edit, one string update).
+- `npm run dev` — boots; the new feedback message is wired through
+  `reasonText` and renders in the live region as before.
+
 ## Open follow-ups (next commits)
 
-- **Bug: pure-rearrangement anagrams of an existing word are allowed.**
-  `canFormWord` rejects exact replay (`consumedWords.includes(word)`)
-  but does not reject same-length rearrangements that consume a
-  single parent: `side → dies → side → dies …` is currently a legal
-  infinite loop. The intended rule is that any word formed from
-  preexisting words must strictly *grow* — the new word's length
-  must exceed every consumed parent's length. Loose-letter draws
-  trivially satisfy this; combining two or more parents (`res + side
-  → resides`, length 7 > 4 and > 3) does too; rearranging a single
-  parent does not. Fix lives in `src/anagramRules.js`: reject when
-  `consumedWords.length > 0 && typed.length <= max(parent.length for
-  parent in consumedWords)`. Note `nub + s → snub` (1 parent + 1
-  loose) stays valid because typed.length (4) > parent.length (3).
 - Sticky-claim or staged-array model so click-to-remove on duplicate
   leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not

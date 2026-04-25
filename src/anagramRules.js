@@ -87,9 +87,15 @@ export function canFormWord(typed, board, dict) {
 
     const consumedWords = subsetIdx.map((i) => board.words[i].word);
 
-    if (consumedWords.includes(word)) {
-      bestFailure = bumpFailure(bestFailure, 'no-new-play', FAILURE_PRIORITY);
-      continue;
+    if (consumedWords.length > 0) {
+      const maxParentLen = consumedWords.reduce(
+        (m, w) => Math.max(m, w.length),
+        0,
+      );
+      if (word.length <= maxParentLen) {
+        bestFailure = bumpFailure(bestFailure, 'no-new-play', FAILURE_PRIORITY);
+        continue;
+      }
     }
 
     if (consumedWords.some((w) => isTrivialInflection(word, w, dict.lemmaIndex))) {

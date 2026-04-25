@@ -1090,3 +1090,103 @@ query to prevent motion").
   concerns; the palette is already dark).
 - Real-browser keyboard / live-region a11y verification — that's
   the separate "A11y polish round 2" follow-up.
+
+## Pure-rearrangement bug fix
+
+### Problem
+
+`canFormWord` rejects exact replay (`consumedWords.includes(word)`)
+but does not reject same-length single-parent rearrangements. So the
+sequence `side → dies → side → dies …` is currently a legal infinite
+loop: each transformation passes the dictionary check, uses all of
+the parent's letters, and is not a trivial inflection.
+
+### Canonical rule (independently confirmed)
+
+In Snatch / Anagrams (the game APPLICATION-SPEC.md is modelled on),
+**every steal must add at least one tile from the pool**. Same-length
+rearrangement is not a valid steal. Confirmed by Wikipedia
+(Anagrams (game)), Bananagrammer (competitive community reference),
+Letter Tile Games Wiki, and BoardGameGeek. Length growth over the
+parent is the universal baseline rule.
+
+The stricter "must rearrange at least two parent tiles" variant
+(disallowing pure insertion like `MONEY + KS → MONKEYS`) is **out of
+scope**: spec example `Nub + S → Snub` would fail this stricter rule
+and the spec explicitly accepts it. So we only enforce the baseline.
+
+### Decision
+
+In `src/anagramRules.js#canFormWord`, replace the single-purpose
+`consumedWords.includes(word)` exact-replay check with a more general
+**max-parent-length growth** check:
+
+```js
+if (consumedWords.length > 0) {
+  const maxParentLen = consumedWords.reduce(
+    (m, w) => Math.max(m, w.length),
+    0
+  );
+  if (word.length <= maxParentLen) {
+    bestFailure = bumpFailure(bestFailure, 'no-new-play', FAILURE_PRIORITY);
+    continue;
+  }
+}
+```
+
+The new rule subsumes the old one:
+
+- **Replay** (`typed === parent`, single parent) — `typed.length ===
+  parent.length`, fails growth check, rejected.
+- **Same-length rearrangement** (`typed != parent`, single parent,
+  same length) — fails growth check, rejected. (NEW: previously
+  accepted.)
+- **Single-parent + loose growth** (`nub + s → snub`) — `typed.length
+  === 4 > 3`, passes.
+- **Multi-parent merge** (`res + side → resides`) — `typed.length ===
+  7 > max(3, 4)`, passes. In general for ≥2 parents, `typed.length
+  ≥ Σ parent_lengths ≥ max_parent_length + min_other_parent_length ≥
+  max_parent_length + 3 > max_parent_length`, so multi-parent always
+  passes (consistent with the spec's intent).
+- **Pure loose draw** — `consumedWords.length === 0`, growth check
+  guarded off.
+
+### Reason code
+
+Reuses the existing `'no-new-play'` reason. The user-facing message
+`reasonText('no-new-play')` in `src/components/GameScreen.vue` is
+broadened from "That is the same word that is already on the table."
+to "You must add at least one new letter when using an existing
+word." Single reason keeps the failure-priority table intact.
+
+### Sources
+
+- [Anagrams (game) - Wikipedia](https://en.wikipedia.org/wiki/Anagrams_(game))
+- [Bananagrammer — The Game of Snatch (a.k.a. Anagrams)](http://www.bananagrammer.com/2009/07/game-of-snatch-aka-anagrams.html)
+- Letter Tile Games Wiki, BoardGameGeek
+
+### Tests added
+
+- `tests/anagramRules.test.js`:
+  - `rejects same-length single-parent rearrangement (dies from
+    side)`. Expects `{ ok: false, reason: 'no-new-play' }`. Headline
+    bug regression test.
+  - `accepts a multi-parent merge that exceeds the longest parent
+    (trains from rat + sin)`. Locks the load-bearing invariant that
+    multi-parent merges are unaffected by the new check; previously
+    untested at the `canFormWord` boundary.
+  - Sharpened existing "rejects rook from rook" test by asserting
+    `reason: 'no-new-play'`, locking the new code path on the replay
+    subcase.
+  - Existing positive tests (`brook from rook + b`, `snub from nub +
+    s`, `redefine from refine + d + e`) act as regression coverage —
+    they must keep passing.
+
+### Out of scope
+
+- The stricter "must rearrange at least two parent tiles" variant
+  (insertion-only steals). The spec accepts `Nub + S → Snub` so we
+  cannot enforce it.
+- Schema / storage changes — the bug is purely in submit-time rule
+  evaluation.
+- Domain-module signature changes — `canFormWord` shape unchanged.

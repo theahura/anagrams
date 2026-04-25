@@ -100,5 +100,19 @@ describe('canFormWord — using preexisting words', () => {
     // 'rook' from rook with no new loose letters — no actual play
     const result = canFormWord('rook', board([], ['rook']), dict);
     expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no-new-play');
+  });
+
+  it('rejects same-length single-parent rearrangement (dies from side)', () => {
+    const result = canFormWord('dies', board([], ['side']), dict);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no-new-play');
+  });
+
+  it('accepts a multi-parent merge that exceeds the longest parent (trains from rat + sin)', () => {
+    const result = canFormWord('trains', board([], ['rat', 'sin']), dict);
+    expect(result.ok).toBe(true);
+    expect(result.consumedWordIndices.sort()).toEqual([0, 1]);
+    expect(result.consumedLoose).toEqual([]);
   });
 });

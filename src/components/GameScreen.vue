@@ -149,7 +149,7 @@ function reasonText(reason) {
     case 'trivial-inflection':
       return 'Anagrams must rearrange letters — no trivial inflections.';
     case 'no-new-play':
-      return 'That is the same word that is already on the table.';
+      return 'Steals must add a new letter — you can’t just rearrange an existing word.';
     default:
       return 'Invalid word.';
   }
