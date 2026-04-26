@@ -1,0 +1,1901 @@
+# Current Progress — Anagrams
+
+## Commit history
+
+### `feat/initial-game` — Initial playable game (this commit)
+
+Brand-new repository scaffolding plus a complete, playable Anagrams MVP.
+
+#### Tooling
+- Vite 7 + Vue 3 SPA, identical setup to `~/code/games/reword`.
+- Vitest + happy-dom for unit + component tests.
+- `npm run build-dict` downloads TWL06 + filters profanity → `data/dictionary.json`.
+
+#### Domain modules (under `src/`)
+- `prng.js` — `cyrb128`, `sfc32`, `getDailyRng`, `getRandomRng`, `seededShuffle`,
+  `seededPick` (ported from reword).
+- `tiles.js` — Bananagrams letter distribution (144 tiles); `createTileSet`,
+  `shuffleTiles`.
+- `pool.js` — immutable three-pool state (`faceDown`, `looseLetters`, `words`);
+  `createPool`, `drawTile`, `formWord`, `isFaceDownEmpty`.
+- `dictionary.js` — `loadDictionary` returning `{ isWord, signatureIndex }`;
+  signature-based anagram lookup.
+- `trivialInflection.js` — port of reword's `isTrivialInflection` (uses
+  `wink-lemmatizer` + override list for drop-e edge cases).
+- `anagramRules.js` — `canFormWord(typed, board, dict)` enforces all
+  spec restrictions: length ≥ 3, in-dictionary, not-profane, must use ALL
+  letters of any consumed preexisting word, not a trivial inflection,
+  not a no-op replay.
+- `scoring.js` — `scoreWord(w) = w.length²`; `hasLoosePoolAnagram` (signature
+  subset enumeration up to size 8); `finalScore = sum − 10·missed_draws`.
+- `game.js` — `createGame`, `drawTile`, `submitWord`, `endGame` orchestrator.
+- `share.js` — Wordle-style share text (mode + score + longest length + time).
+
+#### UI (under `src/components/`)
+- `App.vue` — top-level `home / game / score` state machine, lazy-loads the
+  bundled dictionary on first start.
+- `HomeScreen.vue` — Daily Challenge / Random Trial buttons + rules summary.
+- `GameScreen.vue` — face-up tile rack, word list, typed-input + Submit + Draw,
+  live timer, live score.
+- `ScoreScreen.vue` — final score grid, longest word transformation chain,
+  Share button (clipboard copy).
+
+#### Tests (`tests/`)
+- `prng.test.js`, `tiles.test.js`, `pool.test.js`, `dictionary.test.js`,
+  `trivialInflection.test.js`, `anagramRules.test.js`, `scoring.test.js`,
+  `game.test.js`, `share.test.js`, `app.smoke.test.js`. All 70 tests green.
+
+#### Verified
+- `npm test` — 71/71 passing.
+- `npm run build` — production bundle builds, dictionary emitted as asset.
+- `npm run dev` — boots; HTML, vue components, dictionary asset all served.
+
+#### Post-review fixes applied
+- `wink-lemmatizer` moved from `devDependencies` to `dependencies` (was
+  imported at runtime by `src/trivialInflection.js`).
+- `game.history` (append-only) added so `endGame.buildChain` can reconstruct
+  the longest-word transformation even after parent words have been
+  consumed by `formWord`. Final score now sums history (rewards each step
+  of `fine → refine → redefine`), not just on-table words.
+- Smoke test now asserts on the feedback message text, not just its
+  presence.
+
+### `feat/initial-game` — Click-to-stage tile interaction (this commit)
+
+Adds a hybrid input model: clicks on face-up tiles or on existing word rows
+append letters to the typed input as a fast shortcut. Live multiset
+highlighting shows which tiles and word groups are claimed by the current
+input.
+
+#### New / changed
+- `src/staging.js` (new) — `highlightConsumption(typed, pool)` returns
+  `{ words: Set<idx>, loose: Set<idx> }`. Greedy multiset matching: claim
+  each existing word in order if it fits, then leftmost-first per letter
+  for residual loose tiles. No dictionary / profanity check — purely a UI
+  hint. `canFormWord` remains the source of truth at submit time.
+- `src/components/GameScreen.vue` — face-up tile spans and word rows are
+  now `clickable` with `@mousedown.prevent` handlers (`onTileClick`,
+  `onWordClick`). A `consumption` computed property feeds `used` (loose
+  tiles) and `consumed` (word rows) classes from
+  `highlightConsumption`.
+- `style.css` — `.tile.clickable` cursor + hover transform; `.word-row`
+  rounded background container, `.word-row.clickable` hover, and
+  `.word-row.consumed` accent (green tint + inset border).
+
+#### Tests added
+- `tests/staging.test.js` — 10 unit tests for `highlightConsumption`:
+  empty input, single match, leftmost-of-duplicates, multi-letter, full
+  word coverage, partial-coverage rejection, steal scenarios,
+  over-consumption skipping, unclaimable extras (still claim what fits),
+  case-insensitive.
+- `tests/gameScreenInteraction.test.js` — 6 component tests covering
+  click-to-append (tile + word), cumulative clicks, `used` class on
+  matched loose tiles, `consumed` class on fully-covered words,
+  no `consumed` on partial coverage.
+- `tests/app.smoke.test.js` — added a smoke test asserting tile-click
+  flows through the App boundary into the input box.
+
+#### Verified
+- `npm test` — 88/88 passing (10 staging + 6 gameScreenInteraction + 1
+  app smoke addition + 71 prior).
+- `npm run build` — production bundle builds (≈1.8 MB JS, identical to
+  prior commit; CSS now 5.78 kB up from 5.31 kB).
+- `npm run dev` — boots; HTML, vue components, dictionary asset all
+  served. Tiles and word rows respond to clicks.
+
+### `feat/initial-game` — Wordle-style share grid (this commit)
+
+Replaces the flat-text share output with a Wordle-style emoji block that
+visually summarises the player's run, satisfying APPLICATION-SPEC.md's
+"share button (come up with something clever that we can use that is
+wordle style)" requirement.
+
+#### Format
+
+```
+Anagrams 2026-04-25 — 142
+
+🟩🟩🟩🟩
+🟨🟨🟨🟨🟩🟩
+🟨🟨🟨🟨🟨🟨🟩🟩
+
+Longest 8 · Time 5:00
+```
+
+Per row: 🟨 count = sum of consumed parent-word lengths (recycled
+letters); 🟩 count = remainder (newly-added letters). Random mode shows
+`Anagrams Random — <score>` instead of a date. Empty history → header +
+footer only, no emoji rows.
+
+#### New / changed
+- `src/share.js` — rewritten. New optional `history` param; emits header
+  + emoji rows + footer. Uses U+1F7E9 / U+1F7E8 (large green/yellow
+  squares) for portability across Discord / iMessage / Twitter without
+  variation selectors. No row padding — emoji widths are not consistent
+  across renderers (VS Code / Discord desktop / iMessage all differ);
+  ragged left-aligned rows are the convention.
+- `src/game.js` — `endGame` result now exposes `history` so the score
+  screen can hand it to the share function.
+- `src/components/ScoreScreen.vue` — passes `result.history` into
+  `generateShareText`.
+
+#### Tests added
+- `tests/share.test.js` — 6 new emoji-grid tests covering: empty
+  history, all-green original word, single-parent steal (yellow + green
+  mix), three-row chain (`fine → refine → redefine`), multi-parent
+  all-yellow steal, footer format with longest length and time.
+- Pre-existing share tests (date / score / longest-length / random
+  header / determinism) continue to pass — the new format still contains
+  those substrings.
+
+#### Verified
+- `npm test` — 96/96 passing (was 90; +6 new share tests).
+- No changes to game logic, scoring, or anagram rules.
+
+### `feat/initial-game` — Click-to-remove + Clear button (this commit)
+
+Makes the click-to-stage interaction reversible. Clicking a tile/word
+that is already claimed by the typed input now *removes* its letters.
+Adds a "Clear" button that resets the typed input in one action.
+
+#### New / changed
+- `src/components/GameScreen.vue`:
+  - `onTileClick(i)`: if `consumption.loose.has(i)`, remove the first
+    occurrence of that letter from `typed` (case-insensitive). Else
+    append (existing behavior).
+  - `onWordClick(i)`: if `consumption.words.has(i)`, remove the word's
+    letters from `typed` one-at-a-time, leftmost-first per letter. Else
+    append.
+  - New `onClear()` resets `typed` to `''` and clears feedback.
+  - Two inline pure-string helpers: `removeFirstOccurrence(s, ch)` and
+    `removeWordLetters(s, word)`.
+  - Template: new `<button type="button">Clear</button>` between the
+    input and Submit, disabled while `typed === ''`.
+- No CSS changes needed — existing `.action-btn` + `.action-btn:disabled`
+  styles cover the new button.
+- No domain-module changes (`staging.js`, `anagramRules.js`, `game.js`,
+  `scoring.js`, `pool.js`, etc. are untouched).
+
+#### Tests added
+- `tests/gameScreenInteraction.test.js`:
+  - "removes the letter from input when an already-claimed tile is
+    clicked" (replaces the previous "does not append" no-op test).
+  - "removes the entire word's letters from input when an
+    already-consumed word row is clicked" (typed='brook', word='rook'
+    → typed='b').
+  - "removes only the letters of the clicked word, leaving extras
+    intact" (typed='barook' with extras 'b','a' loose → typed='ba').
+  - "removes letters case-insensitively when input is uppercase".
+  - "renders a Clear button that resets typed input when clicked".
+  - "Clear button is disabled when typed input is empty".
+  - "Clear button is enabled when typed input is non-empty".
+- `tests/app.smoke.test.js`:
+  - "Clear button empties the typed input from the App boundary".
+
+#### Verified
+- `npm test` — 103/103 passing (was 96; +7 new + 1 replaced).
+- `npm run build` — production bundle builds, no size change.
+
+#### Known limitation (documented in RESEARCH-NOTES.md)
+- With duplicate letters, clicking the leftmost-of-letter claimed tile
+  causes the rightmost-of-letter to lose its highlight instead. This is
+  intrinsic to the multiset-claim model; fixing it requires switching
+  to an explicit staged-array model (out of scope for a polish commit).
+  Backspace and Clear both work as fallbacks.
+
+### `feat/initial-game` — Daily streak + best-score persistence (this commit)
+
+Adds a localStorage-backed persistence layer that records each finished
+Daily Challenge run, derives a current streak (consecutive UTC days)
+and a best score, and surfaces both on the Home and Score screens. The
+share text grows a ` · Streak <N>` suffix in daily mode when the streak
+is ≥ 2. Random Trial games never touch storage. No domain-module
+changes.
+
+#### New / changed
+- `src/storage.js` (new) — pure functions over an injected storage
+  shim. `loadStore` is robust to missing key / malformed JSON / wrong
+  schemaVersion / `getItem` throws. `recordDailyResult` is keep-first
+  per date (Wordle convention) and swallows `setItem` failures
+  (Safari Private Mode quota=0). `currentStreak` walks back day-by-day,
+  preserving the streak when today is missing but yesterday is
+  present. `bestScore` and `hasCompletedDate` are pure derivations.
+  `browserStorage()` returns `window.localStorage` after a probe write,
+  else a no-op shim. Schema: `{ schemaVersion: 1, records: { 'YYYY-MM-DD':
+  { score, longestWord, durationMs, completedAt } } }` under the single
+  key `anagrams:v1`. Streak and best are NEVER persisted as
+  denormalized state.
+- `src/share.js` — `generateShareText` accepts an optional `streak`
+  param; appends ` · Streak <N>` to the footer when `mode === 'daily'`
+  and `streak ≥ 2`. Backwards-compatible: omitted/0/1 produces the
+  prior output exactly.
+- `src/components/HomeScreen.vue` — accepts `streak`, `best`,
+  `completedToday` props. Renders a small stats row when either is
+  non-zero; "✓ Played today" sub-label on the Daily Challenge button
+  when `completedToday` is true.
+- `src/components/ScoreScreen.vue` — accepts `streak`, `isNewBest`
+  props; renders a streak / "New best!" pill row in daily mode. Passes
+  `streak` to `generateShareText`.
+- `src/components/App.vue` — owns a `stats` ref. `computeStats()` reads
+  storage and derives `{ streak, best, completedToday }`. On
+  `endGameWithResult` for daily games, snapshots the previous best
+  *before* calling `recordDailyResult` (keep-first means reading after
+  the write would always tie or lose), then sets `isNewBest`. Stats
+  recompute on home and score transitions.
+- `style.css` — `.home-stats`, `.home-stat`, `.played-today-tag`,
+  `.score-streak-row`, `.score-streak`, `.new-best-pill`. Dark palette
+  consistent with existing rules.
+
+#### Tests added
+- `tests/storage.test.js` (new) — 19 unit tests against a `Map`-backed
+  fake storage shim. Covers `loadStore` (empty / malformed / wrong
+  schemaVersion), `recordDailyResult` (round-trip / keep-first /
+  quota-exceeded swallow / `wasNewRecord` flag), `currentStreak`
+  (empty / today-only / N consecutive ending today / N consecutive
+  ending yesterday / 2-day-old gap / trailing-run-only / month and
+  year boundaries), `bestScore` (empty / max), `hasCompletedDate`.
+- `tests/share.test.js` — 4 new tests for the streak suffix
+  (daily+streak≥2 contains `Streak N`, streak=1 absent, omitted/0
+  absent, random+streak absent).
+- `tests/app.smoke.test.js` — `localStorage` stubbed in `beforeEach`;
+  new test pre-seeds storage with two daily records and verifies the
+  home screen shows "Streak", "Best", and the seeded high score.
+
+#### Documentation
+- `src/docs.md` (new) — noridoc covering domain core (game lifecycle,
+  three-pool model, anagram rules, scoring, dictionary), the new
+  storage layer's keep-first / derived-stats invariants, and the
+  share-text contract.
+- `src/components/docs.md` (new) — noridoc covering App.vue as the sole
+  storage caller, the previous-best-snapshot ordering, the
+  date-as-PRNG-seed-and-storage-key convention, and the props/events
+  boundary.
+
+#### Verified
+- `npm test` — 128/128 passing (was 104; +19 storage + 4 share + 1
+  smoke).
+- `npm run build` — production bundle builds cleanly (CSS now 6.54 kB
+  up from 5.78 kB; JS unchanged at ≈1.82 MB).
+- `npm run dev` — boots; index.html, components, dictionary asset all
+  served. HomeScreen now exposes `streak`, `best`, `completedToday`
+  props.
+
+### `feat/initial-game` — Bundle slim-down via precomputed lemmas (this commit)
+
+Pre-computes the trivial-inflection lemma table at dictionary-build
+time and removes `wink-lemmatizer` from the runtime dependency tree.
+Cuts the production JS bundle from 1.82 MB → 93 kB (95% reduction);
+gzipped JS drops from 633 kB → 36 kB. Runtime semantics of
+`isTrivialInflection` are preserved exactly.
+
+#### Why
+`wink-lemmatizer` (used at runtime only by
+`src/trivialInflection.js`) transitively pulls in `wink-lexicon`,
+which ships ~3 MB of WordNet/lexicon JSON — most of the 1.8 MB JS
+bundle. The lookup data the game actually needs is small and finite,
+so we precompute it offline.
+
+#### New / changed
+- `scripts/build-lemmas.js` (new) — maintainer-only script. Exports
+  `buildLemmaIndex(words)` (pure helper) and a `main()` that reads
+  `data/dictionary.json` and writes `data/lemmas.json`. Imports
+  `wink-lemmatizer`; this is the **only** file that does. Wired up
+  via `npm run build-lemmas`.
+- `data/lemmas.json` (new, committed) — schema
+  `{ lemmas: { word: [lemma1, lemma2?] } }`. ~55,500 entries,
+  1.36 MB raw / 267 kB gzipped. Identity entries omitted; lemma list
+  deduped; non-vocabulary lemmas filtered.
+- `src/trivialInflection.js` — rewritten. Removed
+  `import lem from 'wink-lemmatizer'`. New signature
+  `isTrivialInflection(answer, root, lemmaIndex)`. `lemmaIndex`
+  accepts either a `Map<string, string[]>` or a plain object. The
+  `FORCE_NON_TRIVIAL` override list and trailing-`e` drop-e
+  heuristic are preserved verbatim; the heuristic now checks
+  `lemmas.includes(r.slice(0,-1))` instead of calling the lemmatizer.
+- `src/dictionary.js` — `loadDictionary(json, lemmasJson?)` gained an
+  optional second arg. The returned object now exposes
+  `dict.lemmaIndex` (a `Map<string, string[]>`). When `lemmasJson` is
+  omitted, `lemmaIndex` is empty (back-compat for tests).
+- `src/anagramRules.js` — `canFormWord` threads `dict.lemmaIndex`
+  into the `isTrivialInflection(word, w, dict.lemmaIndex)` call.
+- `src/components/App.vue` — `ensureDictionary` now `Promise.all`s
+  fetches of `data/dictionary.json` and `data/lemmas.json`, then
+  `Promise.all`s the two `.json()` parses, then calls
+  `loadDictionary(dictJson, lemmasJson)`.
+- `package.json` — `wink-lemmatizer` moved from `dependencies` to
+  `devDependencies`. New `npm run build-lemmas` script.
+
+#### Tests added
+- `tests/buildLemmas.test.js` (new) — 5 unit tests for
+  `buildLemmaIndex`: maps inflected words → lemma when in vocab,
+  maps simple plurals → singular, omits identity-only words, captures
+  the over-stem case (`rated → rat`) so the trailing-`e` heuristic
+  fires, omits entries whose only candidates are absent from the
+  vocabulary.
+- `tests/trivialInflection.test.js` — rewritten to thread a fixture
+  lemma `Map` through every assertion. Same 12 spec-rule assertions
+  still hold.
+- `tests/anagramRules.test.js`, `tests/game.test.js`,
+  `tests/app.smoke.test.js` — updated to also load
+  `data/lemmas.json` and pass it through `loadDictionary`. The smoke
+  test's `fetch` stub now discriminates by URL to return either
+  dictionary or lemmas JSON.
+
+#### Bundle impact
+- **Before:** `dist/assets/index-*.js` 1,819 kB raw / 633 kB gzipped.
+- **After:** `dist/assets/index-*.js` 93 kB raw / 36 kB gzipped (95%
+  smaller). New `dist/assets/lemmas-*.json` 1,357 kB raw / 267 kB
+  gzipped, lazy-fetched in parallel with the dictionary on first
+  game start.
+- **Total raw payload** (JS + dict + lemmas): 3,937 kB → 3,568 kB.
+- **Gzipped payload:** 1,110 kB → 780 kB. Crucially, **initial JS**
+  drops from 633 kB gzipped to 36 kB gzipped — first paint is now
+  near-instant.
+- **Build time:** 89 s → 0.6 s (147× faster, since wink-lexicon's
+  massive JSON no longer needs to be transformed by Vite/Rollup).
+
+#### Verified
+- `npm test` — 132/132 passing (was 127; +5 buildLemmas).
+- `npm run build` — production bundle builds in 0.6 s.
+- `npm run build-lemmas` — regenerates `data/lemmas.json`
+  deterministically from `data/dictionary.json` (offline).
+
+### `feat/initial-game` — Keyboard / accessibility pass (this commit)
+
+Closes the long-standing keyboard-reach gap on the rack and player-word
+list. Before this commit the game was completely unplayable by keyboard
+— tiles and word rows were `<span>` containers with
+`@mousedown.left.prevent` handlers, which fire only on pointer events.
+After this commit Tab + Enter/Space activates a tile, focus rings are
+visible against the dark theme, screen readers announce tile/word
+labels, and live regions announce submit results.
+
+#### New / changed
+- `src/components/GameScreen.vue`:
+  - Rack tile `<span>`s and player-word `<div>`s are now
+    `<button type="button">` elements with the same `.tile` /
+    `.word-row` classes preserved so visuals are unchanged.
+  - Each rack tile carries `aria-label="Tile {letter}"` (`…, claimed`
+    when in `consumption.loose`). Each word row carries
+    `aria-label="Word {word}, {N} letters"` (`…, claimed` when
+    consumed). Inner per-letter decoration `<span>`s inside a word-row
+    button are `aria-hidden="true"` so AT only reads the row's
+    aria-label, not the chopped-up letters.
+  - Staging logic moved from `@mousedown.left.prevent` to `@click`. A
+    no-op `@mousedown.prevent` is kept on these buttons solely to
+    suppress input blur on pointer click. Native button semantics now
+    handle keyboard activation (Enter on keydown, Space on keyup).
+  - New `inputRef` is bound on the typed `<input>`. After every
+    typed-mutating handler (`onTileClick`, `onWordClick`, `onClear`)
+    the input is programmatically refocused so keyboard users keep
+    typing without a manual Tab back.
+  - Live regions: `.feedback` carries `role="status" aria-atomic="true"`
+    and is rendered **unconditionally** (with empty text when no
+    submission has happened) so the live region exists in the DOM
+    before its content changes — some screen readers miss
+    announcements when the region is created simultaneously with its
+    text. The score is left as a static `<span>` (no live region) so
+    SR users get one announcement per submit (the feedback line),
+    not two; they can navigate to the score on demand. `#timer` gets
+    explicit `aria-live="off"` so per-second tick updates don't
+    spam screen readers.
+  - The typed `<input>` got an `id="word-input-field"` and a paired
+    visually-hidden `<label for="word-input-field" class="sr-only">
+    Type a word</label>` — replaces the placeholder-only a11y
+    anti-pattern.
+- `style.css`:
+  - `button.tile, button.word-row { appearance: none; … }` reset so
+    the new `<button>` form looks identical to the prior
+    `<span>`/`<div>` form. `button.word-row` additionally gets
+    background/border/color resets and `text-align: left` since
+    `<button>` defaults differ from `<div>`.
+  - `:focus-visible` rule covering `.tile`, `.word-row`, `.action-btn`,
+    `.mode-btn`: `outline: 3px solid #b59f3b; outline-offset: 2px;`
+    (#b59f3b vs `#121213` ≈ 5.4:1 contrast ratio, satisfying WCAG
+    2.4.11). No focus ring on mouse-only clicks (browsers handle
+    `:focus-visible` heuristics natively).
+  - `.sr-only` clip-path utility class for the visually-hidden input
+    label.
+- No domain-module changes (`game.js`, `scoring.js`, `pool.js`,
+  `staging.js`, `dictionary.js`, `anagramRules.js`, `share.js`,
+  `storage.js`, `trivialInflection.js` are untouched).
+
+#### Tests added / updated
+- `tests/gameScreenInteraction.test.js`:
+  - Existing 14 click-to-stage tests retargeted from `trigger('mousedown')`
+    to `trigger('click')` (matching the new event wiring; user-visible
+    behavior unchanged).
+  - New `describe('GameScreen accessibility', …)` block, 9 tests:
+    each rack tile is a `<button type="button">`; each tile has an
+    aria-label naming its letter; each word row is a button; each row
+    has an aria-label naming the word; the typed input has an
+    associated label (visible / hidden / aria-label); the feedback box
+    has `role="status"` after a submission; the score region has
+    `role="status"`; the timer has `aria-live="off"`; clicking a tile
+    leaves focus on the typed input element (`document.activeElement`
+    invariant, mounted with `attachTo: document.body`).
+- `tests/app.smoke.test.js`:
+  - Existing tile-click smoke retargeted from `mousedown` to `click`.
+
+#### Verified
+- `npm test` — 141/141 passing (was 132; +9 new).
+- `npm run build` — production bundle builds in 0.6 s, JS ≈ 94 kB raw
+  / 36 kB gzipped (CSS now 6.97 kB, was 6.54 kB; +0.4 kB for the new
+  rules).
+- `npm run dev` — boots; Vite serves the new `aria-label`,
+  `:focus-visible`, and `.sr-only` rules. End-to-end keyboard /
+  screen-reader interaction not driven from CLI; tested at the
+  component-DOM level by the test suite.
+
+### `feat/initial-game` — 7-day calendar grid on home screen (this commit)
+
+Surfaces the existing Daily Challenge persistence layer visually as a
+horizontal 7-cell strip on the home screen. Cells run oldest-first
+left-to-right, ending at today; filled cells = days played, hollow
+cells = days missed, an accent outline ring marks today regardless of
+played/unplayed state. Matches the de-facto pattern used by
+Wordle/Duolingo/GitHub heatmaps. No domain-module changes; no storage
+schema change.
+
+#### New / changed
+- `src/storage.js` — new exported pure helper
+  `recentDays(records, todayDate, count = 7)` returning an oldest-first
+  array of `{ date, played, record? }` entries ending at `todayDate`.
+  Reuses the existing internal `shiftDate` UTC arithmetic. `record`
+  (full underlying entry) is attached only when `played` is true,
+  leaving the shape forward-compatible with future per-cell features.
+- `src/components/HomeScreen.vue` — new optional `recent` prop
+  (`Array`, default `[]`). Renders a `.home-calendar` strip below the
+  existing `.home-stats` row when `(streak > 0 || best > 0) &&
+  recent.length > 0`. Wrapped in `<div role="group" aria-label="Last
+  7 days activity">`. Each cell is a presentational `<div
+  class="home-calendar-cell">` (intentionally non-interactive — no
+  focus, no click) carrying `.played` when the entry is played and
+  `.today` on the rightmost cell. Per-cell `aria-label` and `title`
+  follow GitHub's pattern: `Today, score N, Friday April 25`,
+  `Today, not played yet, Friday April 25`, `Score N, Tuesday April
+  22`, or `Not played, Monday April 21`. Day-letter labels above
+  each cell come from `['S','M','T','W','T','F','S']` indexed by UTC
+  weekday. Helpers `weekdayLetter`, `humanDate`, `cellLabel` all
+  parse the date string via `Date.UTC` to keep weekday computation
+  aligned with the storage-key UTC convention.
+- `src/components/App.vue` — `computeStats()` now also derives
+  `recent: recentDays(records, today, 7)`. Stats shape grew from
+  `{ streak, best, completedToday }` to
+  `{ streak, best, completedToday, recent }`. The `<HomeScreen … />`
+  template line gained `:recent="stats.recent"`. Recompute timing is
+  unchanged — same transitions (`returnHome`,
+  `endGameWithResult`) refresh the calendar.
+- `style.css` — new rules: `.home-calendar` (flex row, `gap: 6px`,
+  `margin-top: 14px`, centered), `.home-calendar-day` (column flex),
+  `.home-calendar-letter` (10 px gray uppercase, 1 px letter-spacing,
+  color `#565758`), `.home-calendar-cell` (28×28 px, 2 px border
+  `#3a3a3c`, 4 px radius, transparent fill), `.home-calendar-cell.played`
+  (fill `#538d4e`, mirrors `.tile.used`), `.home-calendar-cell.today`
+  (`outline: 2 px solid #b59f3b; outline-offset: 2 px` — same accent
+  yellow used by `:focus-visible`). Mobile breakpoint
+  (`@media (max-width: 480px)`) shrinks cells to 24×24 px.
+
+#### Tests added
+- `tests/storage.test.js` — 6 new `recentDays` unit tests: empty
+  records returns 7 unplayed entries with the right oldest/newest
+  dates; today-only attaches the record; mixed history marks the
+  right indices; explicit `count` argument honored; month boundary;
+  year boundary.
+- `tests/homeScreen.test.js` (new file) — 6 component tests with
+  Vue Test Utils + happy-dom: no calendar when `streak===0 &&
+  best===0`; exactly 7 cells when history exists; only the rightmost
+  cell carries `.today`; only `played: true` entries get `.played`;
+  every cell has a non-empty `aria-label` whose content reflects
+  today/played/unplayed state; the `.home-calendar` wrapper has
+  `role="group"` and a non-empty `aria-label`.
+- `tests/app.smoke.test.js` — extended the existing
+  seeded-localStorage test to also assert `.home-calendar` exists
+  and the rightmost `.home-calendar-cell` carries both `.today` and
+  `.played` (today was seeded).
+
+#### Verified
+- `npm test` — 151/151 passing (was 139; +12 new + 1 extension).
+- `npm run build` — production bundle builds cleanly in 0.6 s.
+  CSS now 7.57 kB (was 6.97 kB; +0.6 kB for the new rules); JS
+  unchanged at ≈95 kB raw / 36.9 kB gzipped.
+- `npm run dev` — boots; serves the new `.home-calendar` markup and
+  rules. Verified via the test suite at component-DOM level; full
+  end-to-end manual click-through not run from CLI.
+
+### `feat/initial-game` — `prefers-reduced-motion` honouring (this commit)
+
+Closes the open follow-up "`prefers-reduced-motion` honouring on the
+tile pop-in animation." Adds a single `@media (prefers-reduced-motion:
+reduce)` block to `style.css` that neutralises the rack tile pop-in
+keyframe, the `.tile.clickable:hover` translate, and all the short
+transitions on tiles, word rows, action buttons, and mode buttons —
+honouring WCAG 2.3.3 (Animation from Interactions, Level AAA;
+sufficient technique W3C C39). Pure CSS commit; no JS, no Vue
+templates, no domain modules, no new dependencies.
+
+#### What changed
+- `style.css` — appended a `@media (prefers-reduced-motion: reduce)`
+  block at the end of the file. Two rules:
+  1. A universal-selector reset (`*, *::before, *::after`) setting
+     `animation-duration: 0.01ms !important`,
+     `animation-iteration-count: 1 !important`, and
+     `transition-duration: 0.01ms !important`. Using `0.01ms` (not
+     `0` / `none`) preserves `animationend` / `transitionend` event
+     firing for any future JS that might depend on them.
+     `animation-iteration-count: 1 !important` is included even
+     though we have no infinite animations today: an infinite
+     animation reduced to `0.01ms` duration still loops on the event
+     loop, so capping iterations is the canonical safety belt.
+  2. A targeted `.tile.clickable:hover { transform: none; }` rule.
+     Without this, the universal `transition-duration` reset alone
+     would still let the element *snap* to `translateY(-1px)` on
+     hover — visible 1 px jump. The targeted override removes the
+     end state entirely.
+- `tests/reducedMotion.test.js` (new) — 5 tests that read `style.css`
+  as text and assert (a) the `@media (prefers-reduced-motion:
+  reduce)` block exists; (b) inside it: `animation-duration: 0.01ms
+  !important`, `animation-iteration-count: 1 !important`,
+  `transition-duration: 0.01ms !important`; (c) inside it:
+  `.tile.clickable:hover { … transform: none … }`. The block is
+  isolated via brace-counting so the assertions only match content
+  inside the media block. Headless DOMs (jsdom, happy-dom) do not
+  evaluate `@media (prefers-reduced-motion)` against any system
+  setting, so direct DOM-computed-style tests are not viable —
+  text-inspection of the CSS file is the W3C / CSS-Tricks consensus
+  pattern for plain CSS. (Verified independently by the
+  knowledge-researcher subagent.)
+- `src/components/docs.md` — extended the "Live-region policy in
+  `GameScreen`" bullet's enumeration of what `style.css` hosts to
+  include the new `prefers-reduced-motion` block, with the rationale
+  (`0.01ms` vs `none`, hover-transform-none follow-up, keyframes
+  preserved for users without the OS preference).
+
+#### What did NOT change
+- No JS files, no `.vue` templates.
+- No domain modules.
+- No `package.json`, no new dependencies.
+- No keyframe rules deleted. The `@keyframes pop-in` definition
+  remains; users without the OS preference still see the animation.
+- No existing tests changed. Cascade order is preserved (the new
+  block is appended after every existing rule).
+
+#### Verified
+- `npm test` — 154/154 passing (was 149; +5 new reducedMotion).
+- `npm run build` — production bundle builds cleanly in 0.66 s.
+  CSS now 7.80 kB (was 7.57 kB; +0.23 kB for the new block); JS
+  unchanged at ≈95 kB raw / 36.86 kB gzipped.
+- End-to-end OS-level reduced-motion behavior was not driven from
+  CLI; it is verifiable in Chrome DevTools → Rendering → "Emulate
+  CSS media feature `prefers-reduced-motion`."
+
+#### Reviewer parity note
+- An earlier draft of the block also included `scroll-behavior: auto
+  !important`, recommended by web.dev. Dropped before commit because
+  the codebase declares no `scroll-behavior: smooth` anywhere — the
+  reset would be dead code. YAGNI.
+
+### `feat/initial-game` — Per-day detail popover on calendar cells (this commit)
+
+Surfaces the existing per-day record data (`score`, `longestWord`,
+`durationMs`, `completedAt`) that the v5 persistence layer has been
+storing all along. The 7-day calendar strip on the home screen
+previously rendered all cells as non-interactive `<div role="img">`
+elements with state shown only via fill color and a tooltip-only date
+label. Played cells now render as `<button type="button">` and open a
+small accessible popover when clicked. No domain-module changes; no
+storage schema change.
+
+#### New / changed
+- `src/components/HomeScreen.vue`:
+  - Played calendar cells flip from `<div role="img">` to
+    `<button type="button" aria-haspopup="dialog" aria-expanded
+    aria-controls>`. Unplayed cells stay as `<div role="img">`
+    (no behavior or accessible-name change).
+  - New transient state: `selectedIndex` ref (null when closed,
+    cell index when open), `panelPos` (`{top, left}` for fixed
+    positioning), `cellRefs` (template-ref array, populated only
+    for played cells via a `setCellRef(i)` factory), `panelRef`
+    on the popover panel.
+  - `onCellClick(i, ev)` captures `ev.currentTarget.getBounding
+    ClientRect()`, computes a `position: fixed` anchor below the
+    cell, viewport-edge clamped to the viewport (`PANEL_W = 220`,
+    8 px margin), and sets `selectedIndex = i`.
+  - `closePopover({restoreFocus = true})` sets `selectedIndex
+    = null`. Triggered by the close button (restore focus), Escape
+    via `onDocKeydown` (restore focus), or outside `mousedown` via
+    `onDocMousedown` (do NOT restore focus — the user's pointer
+    has already landed somewhere else; pulling focus back would
+    interrupt their next action). Outside-mousedown uses
+    `event.composedPath()` to skip the panel itself and any cell
+    trigger.
+  - Central `watch(selectedIndex, …)` is the open/close state
+    machine: registers the document-level `mousedown` + `keydown`
+    listeners on open, removes them on close, calls
+    `panelRef.focus()` on `nextTick()` after open, and
+    `cellRefs[prev].focus()` on close. `onBeforeUnmount` removes
+    listeners defensively.
+  - `watch(() => props.recent, …)` auto-closes the popover when
+    `recent` changes (e.g. after finishing a daily run and
+    returning home), avoiding stale data.
+  - Popover panel rendered via `<Teleport to="body">` so its
+    fixed-position layering is independent of any parent stacking
+    context. Panel: `role="dialog" aria-modal="false"
+    aria-labelledby="day-popover-title" tabindex="-1"`. Contents:
+    human date heading (`Tuesday, April 22`), score, longest word,
+    duration formatted as `m:ss` via `formatDuration(ms)`. Close
+    button: `<button class="day-popover-close" aria-label="Close">×`.
+- `style.css`:
+  - `button.home-calendar-cell` reset (`appearance: none; padding:
+    0; cursor: pointer`), hover `transform: translateY(-1px)`, and
+    `:focus-visible` outline (mirrors the existing tile
+    focus-ring palette).
+  - `.day-popover` (220 px fixed panel, dark `#1f1f20` background,
+    border, rounded corners, `box-shadow` for lift, `z-index:
+    1000`).
+  - `.day-popover-close`, `.day-popover-title`, `.day-popover-row`,
+    `.day-popover-label`, `.day-popover-value` with the existing
+    palette (`#3a3a3c` border, `#818384` label gray, `#d7dadc`
+    value).
+
+#### Tests added
+- `tests/homeScreen.test.js` — new
+  `describe('HomeScreen day-detail popover', …)` block, 12 tests:
+  initial-no-popover; clicking-unplayed-cell-does-not-open;
+  played-cell-trigger-exposes-aria-haspopup-and-aria-expanded;
+  click-opens-dialog (`role="dialog" aria-modal="false"`);
+  popover-content (score, longest word, duration formatted as
+  `m:ss`); human-date-heading; close-button-dismisses;
+  Escape-dismisses; outside-mousedown-dismisses (manual
+  `document.dispatchEvent(new MouseEvent('mousedown', {bubbles:
+  true, composed: true}))`); focus-returns-to-trigger after Escape
+  (`document.activeElement === triggerCell` with
+  `attachTo: document.body`); focus-does-NOT-return after outside-
+  mousedown (intentional asymmetry — the user's pointer has
+  already moved); switch-on-different-cell shows the new cell's
+  record and not the previous one.
+
+#### Documentation
+- `src/components/docs.md` — extended HomeScreen section with the
+  played/unplayed cell render split, the popover state shape and
+  `<Teleport to="body">` rationale, the central
+  `watch(selectedIndex)` state machine, the three dismiss paths,
+  the focus-return contract, and the `watch(() => props.recent)`
+  auto-clear. Added "Things to Know" entries for one-popover-at-a-
+  time, outside-mousedown trigger exclusion (flicker prevention
+  when switching cells), teleport / z-index rationale, and
+  optional-chaining defense on `entry.record`.
+- `src/docs.md` — tightened the Recent-days bullet to enumerate
+  the underlying record fields and notes that the HomeScreen
+  popover now reads them on click.
+
+#### Verified
+- `npm test` — 166/166 passing (was 154; +12 new). Existing
+  calendar tests still pass on the `<button>`-instead-of-`<div>`
+  markup for played cells.
+- `npm run build` — production bundle builds cleanly in 0.6 s.
+  CSS now 9.18 kB (was 7.80 kB; +1.38 kB for the new popover
+  rules); JS at 100.98 kB raw / 39.03 kB gzipped (was 100.89 kB
+  / 39.00 kB; +0.1 kB for the popover state machine).
+
+### `feat/initial-game` — Reject pure-rearrangement of existing words (this commit)
+
+Closes the headline bug from the previous WIP note: `side → dies →
+side → dies …` was a legal infinite loop because `canFormWord` only
+rejected exact replay, not same-length rearrangement of a single
+consumed parent. The fix replaces the string-equality replay check
+with a more general **max-parent-length growth check** that subsumes
+both cases. Independently confirmed against the canonical Snatch /
+Anagrams rule (Wikipedia, Bananagrammer, BoardGameGeek): every steal
+must add at least one tile from the pool.
+
+#### What changed
+- `src/anagramRules.js` — `canFormWord` now rejects with reason
+  `'no-new-play'` whenever `consumedWords.length > 0 && typed.length
+  <= max(parent.length)`. Replaces the previous
+  `consumedWords.includes(word)` exact-replay check, which it
+  subsumes (replay = same word, same length, single parent). No new
+  failure code; no signature change; failure-priority table
+  unchanged.
+- `src/components/GameScreen.vue` — `reasonText('no-new-play')`
+  message broadened from "That is the same word that is already on
+  the table." to "You must add at least one new letter when using an
+  existing word." (single message covers both replay and
+  rearrangement cases).
+- No domain-module signature changes. No CSS, no storage, no
+  dictionary, no lemma changes. No new dependencies.
+
+#### Why it's a one-line rule
+- **Loose-only draws** (no parents): rule guarded off by
+  `consumedWords.length > 0`.
+- **Single-parent + loose growth** (`nub + s → snub`): typed.length
+  4 > parent.length 3 — passes.
+- **Multi-parent merges** (`res + side → resides`): typed.length
+  7 > max(3, 4) — passes. In general, ≥2 parents force `typed.length
+  ≥ Σ parent_lengths ≥ max_parent_length + min_other_parent_length ≥
+  max + 3 > max`, so multi-parent always passes.
+- **Same-length single-parent rearrangement** (`side → dies`):
+  typed.length 4 ≤ max parent length 4 — rejected. (NEW.)
+- **Exact replay** (`rook → rook`): typed.length 4 ≤ 4 — rejected.
+  (Same outcome as before, narrower check.)
+
+#### Tests added
+- `tests/anagramRules.test.js`:
+  - `rejects same-length single-parent rearrangement (dies from
+    side)` — headline bug regression. Asserts
+    `{ ok: false, reason: 'no-new-play' }`.
+  - The pre-existing replay-rejection test (`rook from rook with no
+    new letters`) was sharpened to also assert
+    `reason === 'no-new-play'`, locking the new code path's behavior
+    on the replay subcase.
+  - `accepts a multi-parent merge that exceeds the longest parent
+    (trains from rat + sin)` — locks the load-bearing invariant that
+    the growth check never accidentally rejects multi-parent
+    merges. Previously untested at the `canFormWord` level.
+- All existing positive tests (`brook from rook + b`, `snub from nub
+  + s`, `redefine from refine + d + e`) act as regression coverage
+  and continue to pass.
+
+#### Documentation
+- `src/docs.md` — updated the "Word legality" bullet to describe the
+  broadened semantics of the `'no-new-play'` reason: covers any
+  consume-without-growth play (replay or same-length single-parent
+  rearrangement); multi-parent merges always pass.
+- `RESEARCH-NOTES.md` — appended a "Pure-rearrangement bug fix"
+  section with the canonical-rule citations, decision rationale, and
+  out-of-scope notes (the stricter "must rearrange ≥2 parent tiles"
+  variant is rejected because the spec accepts `Nub + S → Snub`).
+
+#### Verified
+- `npm test` — 168/168 passing (was 166; +2 new tests, +1 sharpened
+  existing test asserting the reason code).
+- `npm run build` — production bundle builds cleanly. No bundle-size
+  change (one-line logic edit, one string update).
+- `npm run dev` — boots; the new feedback message is wired through
+  `reasonText` and renders in the live region as before.
+
+### `feat/initial-game` — Per-day share-text replay (this commit)
+
+Closes the open follow-up "Share-text replay from a past day on the
+calendar popover." Played-day cells in the home-screen calendar
+popover now expose a Share button that copies the full Wordle-style
+emoji grid for that past run. Old records (written before this commit
+existed, no `history` field) continue to load and just don't show the
+button — no degraded mode.
+
+#### What changed
+- `src/storage.js` — `recordDailyResult({ ..., history })` now
+  persists `history` inside the record when provided. No
+  `SCHEMA_VERSION` bump: the change is purely additive-optional, so
+  legacy v1 records continue to load (their popover just won't show
+  the Share button).
+- `src/components/App.vue` — `endGameWithResult` forwards
+  `history: result.history` into `recordDailyResult` so future daily
+  records carry their transformation chain.
+- `src/components/HomeScreen.vue` —
+  - Imports `generateShareText` from `../share.js`.
+  - Adds `copiedDay` ref + `copiedTimer` (transient share-button
+    feedback) and `canShareSelected` computed (gated on
+    `Array.isArray(selectedEntry.record.history) && length > 0`).
+  - New `async shareSelectedDay()` mirrors `ScoreScreen.onShare`:
+    builds share text via `generateShareText({ mode: 'daily', date,
+    score, longestWord, totalTimeMs: durationMs, history,
+    streak: 0 })`, awaits `navigator.clipboard.writeText`, flips
+    `copiedDay = true` for 2 s on success, falls back to
+    `window.prompt('Copy your result:', text)` on rejection.
+  - `closePopover` now also resets `copiedDay = false` and clears any
+    pending `setTimeout`, so reopening always starts in the
+    un-copied state.
+  - Template: `<button class="action-btn day-popover-share">` rendered
+    inside the popover panel only when `canShareSelected` is true.
+- `style.css` — new `.day-popover-share` rule: `margin-top: 12px`,
+  full width, slightly tighter padding/font than the default
+  `.action-btn`.
+
+#### What did NOT change
+- No `SCHEMA_VERSION` bump (per CLAUDE.md YAGNI; additive-optional
+  fields don't justify migration plumbing — the next genuinely
+  breaking change will introduce one).
+- No new dependency.
+- No domain-module signature changes (`generateShareText` already
+  accepted `history` and `streak`).
+- No retroactive streak calculation: past-day shares always pass
+  `streak: 0`, so the share footer never carries `Streak <N>`.
+  Streak is a "right now" concept; reconstructing it as it stood on a
+  past date would require walking records back from each share-target
+  date — deliberately out of scope.
+- No shared clipboard composable. The `shareSelectedDay()` shape
+  duplicates `ScoreScreen.onShare`; a single duplicate isn't
+  premature abstraction.
+
+#### Tests added
+- `tests/storage.test.js` — 2 new tests under
+  `recordDailyResult — history field`:
+  - "persists a history array round-trip when provided" — write
+    record with `history: [{word, parents}, …]`, read back via
+    `loadStore`, assert equality.
+  - "loads a v1 record without a history field and returns history
+    as undefined" — pre-seed `localStorage` with a legacy v1 shape
+    (no `history` key); assert `loadStore` returns the record with
+    `record.history === undefined`.
+- `tests/homeScreen.test.js` — 6 new tests under
+  `HomeScreen day-detail popover — share`:
+  - Share button rendered when `record.history` is non-empty.
+  - Share button NOT rendered when `record.history` is absent.
+  - Share button NOT rendered when `record.history` is `[]`.
+  - Clicking Share calls `navigator.clipboard.writeText` once with
+    text containing the entry's date AND score AND at least one
+    Wordle-grid emoji (`🟩` or `🟨`).
+  - Switching to a different played cell after copying resets the
+    button label from "Copied!" back to "Share" (race-leak
+    regression).
+  - Falls back to `window.prompt` (with text containing the score)
+    when `clipboard.writeText` rejects.
+  - Clipboard mock installed per-test via `Object.defineProperty(
+    navigator, 'clipboard', { value: { writeText: vi.fn() },
+    configurable: true, writable: true })`. Per-test
+    `vi.restoreAllMocks()` plus a defensive cleanup that removes
+    any `[role="dialog"]` left attached to `document.body` (Teleport
+    artifacts can otherwise leak across tests). Pattern documented
+    in RESEARCH-NOTES.md under v11.
+
+#### Race-condition guard
+`shareSelectedDay` captures `selectedIndex.value` as `startedFor`
+*before* awaiting `navigator.clipboard.writeText`. After the await
+(success or reject), if `selectedIndex.value !== startedFor`, the
+handler returns early without setting `copiedDay = true` or invoking
+`window.prompt`. Without this guard, a clipboard write that resolved
+*after* the user closed the popover (or switched cells) would (a)
+flash "Copied!" on the next opened popover that the user never
+shared, and (b) leak a stale `setTimeout(2000)` that would silently
+flip the next session's button label mid-view. `onCellClick` also
+proactively resets `copiedDay` on cell-to-cell switch (which doesn't
+go through `closePopover`), so the watcher's open-branch
+side-effects (focus management, listener registration) are
+unaffected.
+
+#### Documentation
+- `src/docs.md` — Persistence-layer bullet now documents the optional
+  `history` field on the persisted record shape; Recent-days bullet
+  notes `history` flows through `recentDays` and powers the new
+  per-day Share button. The "Schema versioning is strict-equal"
+  Things-to-Know entry now distinguishes breaking changes (require
+  bump) from additive-optional fields (do not).
+- `src/components/docs.md` — App.vue daily-recording bullet documents
+  the new `history` arg; HomeScreen popover bullet adds `copiedDay`
+  to the transient state list; new dedicated "popover Share button"
+  bullet covers the visibility gate, `streak: 0` rationale, the
+  intentional `ScoreScreen.onShare` parallel, and the
+  `copiedDay`-resets-on-close invariant.
+
+#### Verified
+- `npm test` — 176/176 passing (was 168; +2 storage + 6 homeScreen).
+- `npm run build` — production bundle builds cleanly in 0.6 s. CSS
+  now 9.26 kB (was 9.18 kB; +0.08 kB for the `.day-popover-share`
+  rule); JS at 101.79 kB raw / 39.24 kB gzipped (was 100.98 kB /
+  39.03 kB; +0.8 kB for the new computed/handler/template).
+- `npm run dev` — boots; HomeScreen popover now renders the Share
+  button on played cells whose record has a non-empty `history`.
+
+### `feat/initial-game` — Local-midnight Daily Challenge reset (this commit)
+
+Switches the Daily Challenge puzzle seed and storage record key from
+UTC to the user's local-calendar date, so the puzzle resets at local
+midnight. Closes the open follow-up "Local-midnight reset for the
+Daily Challenge (industry consensus over UTC)." NYT Wordle, NYT
+Connections, and most daily-puzzle games follow this convention; the
+prior UTC behavior surprised users in non-UTC timezones (Pacific time
+saw the new puzzle at 5 PM the prior local day).
+
+#### What changed
+- `src/dateKey.js` (new) — single source of truth for the daily date
+  string. Exports `formatLocalDate(date)` (pure: `${y}-${pad(m+1)}-${
+  pad(d)}` from local-time accessors) and `todayLocal()` (returns
+  `formatLocalDate(new Date())`). Manual local-time formatting was
+  preferred over `toLocaleDateString('en-CA')` per
+  [tc39/ecma402#891](https://github.com/tc39/ecma402/issues/891) — for
+  a primary key, `Intl` is too clever.
+- `src/components/App.vue` — deleted the private `function todayUTC()
+  { return new Date().toISOString().slice(0, 10) }` and replaced both
+  callsites (`computeStats()` and `startGame()`) with `todayLocal()`
+  imported from `../dateKey.js`. Function-call shape unchanged. The
+  lock-at-game-start architecture (`game.value.date` captured once in
+  `startGame`) is preserved verbatim — a session that crosses local
+  midnight finishes on the date it began (Wordle convention).
+
+#### What did NOT change
+- `src/storage.js#shiftDate` continues to use `Date.UTC` math
+  internally. That is opaque-string `±N`-day arithmetic on a
+  `YYYY-MM-DD` label — timezone-agnostic, not a semantic UTC
+  commitment. Re-described in the noridocs to make this explicit.
+- `src/components/HomeScreen.vue#parseDate/weekdayLetter/humanDate`
+  continue to parse via `Date.UTC` for stable cross-TZ weekday
+  rendering. The input is just a calendar-date label.
+- No `SCHEMA_VERSION` bump. The schema *shape* is unchanged; only the
+  *interpretation* of date keys flips from UTC to local. A migration
+  framework will land when the first genuinely breaking shape change
+  appears (per the v11 RESEARCH-NOTES decision).
+- No migration code. Existing UTC-keyed records orphan harmlessly
+  (CLAUDE.md YAGNI; for most users the divergence is at most one
+  calendar day).
+
+#### Tests added
+- `tests/dateKey.test.js` (new) — 3 unit tests:
+  - `formatLocalDate` zero-pads single-digit months and days
+    (`new Date(2026, 0, 5, 12, 0, 0)` → `'2026-01-05'`).
+  - `formatLocalDate` formats end-of-year (`new Date(2026, 11, 31,
+    12, 0, 0)` → `'2026-12-31'`).
+  - `todayLocal` wired to system clock — `vi.setSystemTime(new
+    Date(2026, 3, 25, 12, 0, 0))` → `todayLocal()` returns
+    `'2026-04-25'`.
+- `tests/app.smoke.test.js` "shows Streak and Best..." — switched from
+  `new Date().toISOString().slice(0, 10)` (UTC) to
+  `vi.useFakeTimers()` + `vi.setSystemTime(new Date(2026, 3, 25, 12,
+  0, 0))` plus hardcoded `today = '2026-04-25'`/`yesterday =
+  '2026-04-24'`. CI-stable across host timezones; exercises the new
+  local-date path through the App boundary. Pinning to local-noon
+  keeps both UTC and local on the same calendar day in any reasonable
+  timezone, so the seed and the App's "today" agree.
+
+#### Documentation
+- `src/docs.md` — Determinism flow bullet now references
+  `src/dateKey.js`. Persistence-layer / `recentDays` bullets:
+  "consecutive UTC days" → "consecutive local-calendar days" and
+  clarification that `shiftDate` is opaque-string arithmetic.
+  Things-to-Know "Date string..." rewritten to reflect local-calendar
+  semantics, link to `src/dateKey.js`, call out the lock-at-start
+  pattern, and disclaim `shiftDate`'s UTC math as a stable-arithmetic
+  trick.
+- `src/components/docs.md` — App.vue date-convention bullet:
+  `todayUTC()` → `todayLocal()` from `src/dateKey.js`. HomeScreen
+  popover Share-button bullet: streak relative to "today's UTC date"
+  → "today's local-calendar date." Replays bullet: "same UTC day" →
+  "same local day."
+
+#### Verified
+- `npm test` — 179/179 passing (was 176; +3 dateKey tests). The smoke
+  test that was reworked still passes; no regressions elsewhere.
+- The lock-at-start invariant is structurally preserved by the
+  existing `App.vue` architecture (date captured once in `startGame`,
+  read from `game.value.date` thereafter); no new test was added for
+  it because verifying it requires reaching into component internals
+  for marginal value.
+
+### `feat/initial-game` — Sticky-claim trail (this commit)
+
+Closes the v4 known-limitation note "with duplicate letters, clicking
+the leftmost-of-letter claimed tile causes the rightmost-of-letter to
+lose its highlight instead." Replaces the typed-string-as-source-of-
+truth + greedy-multiset highlight model with an identity-bound
+**claim trail**: clicks record *which specific tile* was clicked, so
+click-to-remove un-highlights that tile, not the leftmost-of-letter
+match. Independently confirmed industry-pattern parity with chip /
+multi-token inputs (Downshift `useMultipleSelection`, shadcn-vue
+`TagsInput`, PrimeVue `Chips`) — array of identity-bearing entries is
+the model; the text input is a transient editor for the next entry.
+
+#### What changed
+- `src/staging.js` — `highlightConsumption(typed, pool, trail?)`
+  gains an optional 3rd parameter. When `trail` is undefined or
+  contains no identity entries (only `kind:'typed'` or empty), the
+  function falls through to the legacy `findConsumption` +
+  `partialHighlight` path — pre-existing 2-arg call sites unchanged.
+  When `trail` contains any identity entry (`kind:'loose'` or
+  `kind:'word'` with a valid `sourceIndex`), those indices pre-claim
+  the highlight set and a residual greedy pass over the
+  `kind:'typed'` letters fills in unclaimed tiles/words. Identity-
+  claimed tiles are excluded from the greedy pass (so a typed `r`
+  after clicking tile 0 (R) picks tile 1, not tile 0 again). Stale
+  `sourceIndex` values are silently ignored via bounds-check.
+- `src/components/GameScreen.vue` — replaces `const typed = ref('')`
+  with `const trail = ref([])` plus a writable `computed({get, set})`
+  named `typed`. Getter joins trail letters into the v-model'd input
+  value. Setter diffs old/new strings: append-suffix pushes
+  `kind:'typed'` entries; backspace-prefix pops trail tail; any
+  other divergence (paste, mid-edit, `setValue` from tests) **demotes**
+  the trail to a flat array of `kind:'typed'` entries.
+  - `onTileClick(i)`: identity entry exists → splice it (sticky-
+    identity removal); else greedy claim → splice first `kind:'typed'`
+    entry whose letter matches; else push new identity entry.
+  - `onWordClick(i)`: any `{kind:'word', sourceIndex:i}` entries →
+    splice them all atomically; else greedy claim → strip word's
+    letters from typed entries; else push N identity entries.
+  - `onClear()` and submit-success path reset `trail.value = []`
+    directly (skipping the setter, which would demote rather than
+    cleanly clear). Submit success clears trail because consumed
+    loose tiles shift `looseLetters` indices, invalidating
+    `sourceIndex` values; draws append to `looseLetters`, leaving
+    indices stable, so trail survives across draws.
+- No domain-module changes (`anagramRules`, `game`, `pool`,
+  `scoring`, `share`, `storage`, `dictionary`, `trivialInflection`,
+  `multiset`, `prng`, `tiles`, `dateKey` are untouched).
+- No CSS changes. No new dependencies.
+
+#### Tests added
+- `tests/staging.test.js` — 7 new tests under `highlightConsumption
+  with claim trail`: identity over leftmost-first, two-tile identity,
+  greedy fallback for typed-only entries (parity with old behavior),
+  mixed identity + typed, identity excluded from greedy fallback,
+  identity word claim over greedy, all-typed word fallback.
+- `tests/gameScreenInteraction.test.js` — 6 new tests under
+  `GameScreen sticky-claim trail`: headline regression (rack
+  `[R,R,T,S]`, click 0, click 1, click 0 → tile 0 unclaimed, tile 1
+  claimed); preserves identity across an unrelated typed letter;
+  Clear empties trail and highlight; submit-success resets identity;
+  invalid submit preserves identity; word-row second click preserves
+  separately-clicked tile's identity.
+
+#### Documentation
+- `src/docs.md` — Core Implementation gains a "Staging / highlight
+  model" bullet documenting the trail entry shape table, the
+  fall-through-to-legacy contract, the hybrid identity-pre-claim +
+  greedy-residue path, and the bounds-check / silent-ignore
+  semantics. Things-to-Know gains entries on the 2-arg back-compat
+  guarantee and on why trail identity exists (the duplicate-letter
+  leftmost-claim regression).
+- `src/components/docs.md` — Core Implementation gains
+  "GameScreen — staging-trail model" and "GameScreen — click handler
+  decision tree" bullets. Things-to-Know replaces the old
+  "typed input is source of truth" entry with five new entries:
+  trail-as-source-of-truth, keyboard-vs-click unified through trail,
+  click-to-remove preserves clicked-tile identity (with
+  CURRENT-PROGRESS.md cross-link), trail-clears-on-submit-not-draw
+  (with `sourceIndex`-validity rationale), and demote-on-divergence
+  safety net.
+- `RESEARCH-NOTES.md` — appended a "Sticky-claim trail / staged-tile
+  model (v13 commit)" section with the bug analysis, design
+  decisions, edge cases (Android Chrome composition input,
+  reconciliation safety net), test plan, and out-of-scope list.
+
+#### Verified
+- `npm test` — 192/192 passing (was 179; +13 new tests).
+- `npm run build` — production bundle builds cleanly in 0.6 s. CSS
+  unchanged at 9.26 kB. JS at 103.64 kB raw / 39.89 kB gzipped (was
+  101.79 kB / 39.24 kB; +1.85 kB raw for the trail logic + writable
+  computed).
+
+#### Known limitation
+- Mobile / IME composition input is not supported through the new
+  setter path. The setter only handles append-suffix /
+  backspace-prefix / divergent diffs. `insertCompositionText` events
+  on Android Chrome / GBoard arrive as full-string replacements,
+  which trigger demote — losing identity. The game is desktop-first
+  and English-only; mobile composition support is deferred.
+
+### `feat/initial-game` — Twitter-budget share-grid truncation (this commit)
+
+Closes the open follow-up "Truncate share grid for very long runs
+(Twitter 280-char limit) — not hit by typical games but possible."
+Marathon Anagrams runs (25–30 words with steals) silently get cut by
+Twitter, making the share look broken (mid-row truncation, missing
+footer). After this commit, over-budget grids render as the first 3
+emoji rows + a single `… +N more` line + the last 3 emoji rows;
+header and footer are emitted verbatim. Common-case daily plays
+(5–10 words) bypass the truncation branch and emit byte-identical
+output to the prior implementation.
+
+#### What changed
+- `src/share.js`:
+  - New module-level constants `MAX_WEIGHTED_LENGTH = 260`,
+    `HEAD_KEEP = 3`, `TAIL_KEEP = 3` (not exported).
+  - New private helper `weightedLength(text)` — iterates by code
+    point (`for (const ch of text)`) and applies the rule
+    `cp <= 0x7F ? 1 : 2` (ASCII = 1 weight, everything else = 2).
+    Conservative over-approximation of the `twitter-text` v3 weighted
+    model: emoji squares 🟩 / 🟨 (U+1F7E9 / U+1F7E8) score 2 weight
+    each (correct); rare punctuation like the em-dash `—` and middle-
+    dot `·` over-count by 1 each (≤ 3 weight total per share, well
+    inside the 20-weight buffer between our 260 budget and Twitter's
+    280 hard limit).
+  - New private helper `assemble(header, rows, footer)` — extracted
+    from the existing assembly logic so the truncated and untruncated
+    paths share one format definition. No behavior change.
+  - `generateShareText` gains a single conditional branch: if
+    `rows.length > HEAD_KEEP + TAIL_KEEP` AND
+    `weightedLength(fullText) > MAX_WEIGHTED_LENGTH`, splice
+    `[...rows.slice(0,3), '… +N more', ...rows.slice(-3)]` and
+    re-`assemble`. Otherwise return the full assembled text.
+- No domain-module changes (`game.js`, `pool.js`, `scoring.js`,
+  `anagramRules.js`, `staging.js`, `storage.js`, `dictionary.js`,
+  `trivialInflection.js`, `dateKey.js`, `tiles.js`, `prng.js` are all
+  untouched). No `.vue` template changes; popover Share button on
+  HomeScreen and Score screen Share button continue calling
+  `generateShareText` with the same arguments — truncation flows
+  through automatically.
+- No CSS changes. No new dependencies. No `npm i twitter-text` —
+  twitter-text is a 100kB+ dependency we'd be importing for ~5
+  lines of weighting logic, so we open-coded the conservative
+  approximation instead.
+- No `SCHEMA_VERSION` bump. Persisted `history` arrays in
+  localStorage round-trip through the same truncation when popover-
+  replayed.
+
+#### Why head + tail + `… +N more`, not re-encoding
+Long-form Wordle variants like `64ordle.au` solve the 280-char
+problem by re-encoding each guess as a single tier-color emoji
+(packing 64 plays into ~64 emoji). We deliberately rejected that
+approach for Anagrams: the per-row 🟨/🟩 split is the share's most
+informative signal — it shows how much of each play was *stolen*
+from existing words vs *newly added* — and collapsing each row to a
+single tier-emoji throws that away. Head + tail + count summary
+keeps the structural meaning of the shown rows intact and the
+non-Wordle-variant convention (truncation) is the right trade-off
+for a game whose share text is small per row but variable in count.
+Source citations and the full design write-up live in
+RESEARCH-NOTES.md under "Share-grid truncation for Twitter 280-char
+limit (v14 commit)."
+
+#### Tests added
+- `tests/share.test.js` — new `describe('generateShareText —
+  truncation', …)` block, 8 tests:
+  - "does not truncate when history fits within the share budget"
+    (6 four-letter words; output contains all 6 rows verbatim, no
+    `more` text).
+  - "truncates when history overflows the share budget" (30 six-
+    letter rows; output has ≤ 6 emoji rows, contains `+24 more`).
+  - "preserves the header verbatim when truncated".
+  - "preserves the full footer (Longest, Time, Streak) verbatim
+    when truncated".
+  - "keeps first 3 rows then elision then last 3 rows in original
+    order when truncated" — uses uniquely-shaped emoji rows (head
+    via parents `[]`/`['ab']`/`['abc']`, tail via parents `['x']`/
+    `['xy']`/`['xyz']`) so each `rowFor(entry)` produces a distinct
+    string. Asserts via `text.split('\n').filter(emoji-only)` plus
+    `findIndex` for the elision marker.
+  - "truncated output stays within Twitter weighted-length 280" —
+    independently re-implements the conservative weight rule in
+    the test file (5 lines) and asserts on the returned string.
+  - "drops just one row when history has exactly 7 overflowing
+    rows" (7 eighteen-letter rows → `+1 more`). The 30-row case
+    above (`+24 more`) and this 7-row case bracket the dropped-
+    count formula range.
+  - "does not truncate when history has 6 or fewer rows even if
+    oversized" (6 fifteen-letter rows; rows.length ≤ HEAD+TAIL so
+    truncation suppressed even though weighted length may exceed
+    260).
+- All 14 previously-existing `share.test.js` tests pass without
+  modification — they exercise small histories that don't hit the
+  truncation path.
+
+#### Documentation
+- `src/docs.md` — extended the "Share text contract" bullet to note
+  centralised assembly via `assemble()`. Added a new "Share text
+  Twitter-budget truncation" Core-Implementation bullet covering
+  the budget constant, kept-counts, elision format, suppression
+  rule, and conservative weighting helper. Added a Things-to-Know
+  entry "Share-text truncation chose head+tail over re-encoding to
+  preserve the per-row 🟨/🟩 split" capturing the design rationale,
+  the byte-identical guarantee for kept rows, and the
+  test-observable-behaviour-not-constants policy.
+- `src/components/docs.md` — extended the HomeScreen popover
+  Share-button bullet to note that truncation flows through
+  automatically for past-day shares (no popover-specific handling),
+  cross-referencing `src/docs.md`.
+- `RESEARCH-NOTES.md` — appended a "Share-grid truncation for
+  Twitter 280-char limit (v14 commit)" section with `twitter-text`
+  v3 spec citations, long-form-Wordle precedent (64ordle, etc.),
+  the head-vs-tail design decision, the conservative
+  ASCII-vs-non-ASCII weighting rationale, full test plan, and
+  out-of-scope items.
+
+#### Verified
+- `npm test` — 202/202 passing (was 194; +8 new). 14 prior
+  `share.test.js` tests untouched and still passing.
+- `npm run build` — production bundle builds cleanly in 0.7 s.
+  CSS unchanged at 9.26 kB. JS at 103.92 kB raw / 40.02 kB gzipped
+  (was 103.64 kB / 39.89 kB; +0.28 kB raw for the truncation
+  branch + helpers).
+
+### `feat/initial-game` — Screen-reader alt-text share variant (this commit)
+
+Closes the v14 open follow-up "Aria-label 'alt text' share variant for
+screen readers (per Slate's Wordle-accessibility piece, wa11y.co does
+this for Wordle)." Today `generateShareText` emits an emoji grid that
+screen readers (NVDA, VoiceOver, JAWS, TalkBack) announce as "green
+square. green square. green square…" — the canonical Wordle a11y
+complaint and a documented WCAG H86 violation. After this commit, both
+share surfaces (final Score screen + Home-calendar popover) expose a
+sibling "Copy alt text" button that copies a plaintext narrative form
+of the same play. Pure additive change: `generateShareText` is bytewise
+unchanged; the primary Share button keeps the canonical emoji grid for
+social posting.
+
+#### Format
+
+```
+Anagrams, daily April 25 2026. Score 142.
+Word 1: 4 new letters.
+Word 2: 4 carried, 2 new.
+Word 3: 6 carried, 2 new.
+Longest word 8 letters. Time 5 minutes 23 seconds. Streak 5.
+```
+
+Random-mode header: `Anagrams, random run. Score 50.` Per row,
+`parents.length === 0` → `Word K: N new letters.`; else → `Word K: M
+carried, N new.` (M = sum parent lengths, N = word.length − M ≥ 1
+since v13 rejects same-length rearrangements). Time: `< 60s` →
+`N seconds`; `>= 60s` and `s===0` → `M minutes`; else → `M minutes N
+seconds`. Singular forms (1 second / 1 minute / 1 new letter / 1 more
+word) explicit. Truncation parity with the emoji form: `history.length
+> 6` → head-3 + `…and N more word(s)…` + tail-3.
+
+#### What changed
+- `src/share.js` — new exported `generateShareAltText({mode, date,
+  score, longestWord, totalTimeMs, history, streak})`. Same input
+  shape as `generateShareText`, returns a plaintext string.
+  Private helpers `assembleAlt`, `sentenceFor`, `humanizeDate`,
+  `humanizeTime`, plus a `MONTH_NAMES` array. Reuses the existing
+  `HEAD_KEEP=3`/`TAIL_KEEP=3` truncation thresholds. Emits **no
+  emoji, no em-dash (`—`), no middle-dot (`·`), no `YYYY-MM-DD`** —
+  all four are read poorly by screen readers (CSUN dashes guide,
+  WebAIM thread, BOIA emoji guidance).
+- `src/components/ScoreScreen.vue` — added `copiedAlt` ref,
+  `canCopyAlt` computed (`Array.isArray(result.history) &&
+  result.history.length > 0`), `onCopyAltText()` handler. New
+  `<button class="action-btn">{{ copiedAlt ? 'Copied!' : 'Copy alt
+  text' }}</button>` in `.score-actions` between the primary Share
+  button and Home, gated on `canCopyAlt`. Extracted
+  `buildShareArgs()` so `onShare`/`onCopyAltText` share argument
+  construction.
+- `src/components/HomeScreen.vue` — added `copiedAltDay` ref,
+  `copiedAltTimer` (paralleling existing `copiedDay`), and an
+  async `copyAltSelectedDay()` handler. New sibling `<button
+  class="action-btn day-popover-share day-popover-share-alt">`
+  inside the popover panel, gated on the same `canShareSelected`
+  predicate as the primary Share button. Both timers reset on
+  `onCellClick` (cell-to-cell switch) and `closePopover` (any
+  dismiss). Same `startedFor = selectedIndex.value` race-guard
+  pattern from v12 replicated for the alt-text handler. Extracted
+  `buildSelectedShareArgs(entry)` helper.
+- No CSS changes (existing `.action-btn` and `.day-popover-share`
+  rules cover the new button; CSS modifier class
+  `.day-popover-share-alt` reserved for future styling but
+  currently unused).
+- No domain-module changes (`game.js`, `pool.js`, `scoring.js`,
+  `anagramRules.js`, `dictionary.js`, `staging.js`, `storage.js`,
+  `trivialInflection.js`, `dateKey.js`, `tiles.js`, `prng.js` are
+  untouched). No `SCHEMA_VERSION` bump (no persisted shape
+  change).
+
+#### Tests added
+- `tests/share.test.js` — new `describe('generateShareAltText',
+  …)` block, 21 tests: humanized-date header (no `YYYY-MM-DD`);
+  random-mode header reads "random run" with no date; single-row
+  no-parents → `Word 1: 4 new letters.`; single-row one-parent →
+  `Word K: M carried, N new.`; multi-row consecutive numbering;
+  `Longest word N letters.` present when `longestWord` set;
+  omitted when empty/null; time `< 60s` → `Time N seconds.`
+  (singular `1 second`); time exactly `M:00` → `Time M minutes.`;
+  time mixed → `Time M minutes N seconds.`; time exactly 1 minute
+  → `Time 1 minute.` (singular); streak suffix daily ≥2 only;
+  suppressed for streak 0/1; suppressed in random mode regardless;
+  `history.length > 6` truncates with head-3 + `…and N more
+  words…` + tail-3 (asserted via word-line filter); singular
+  `…1 more word…` form when exactly 1 dropped; ≤6 rows verbatim;
+  empty history → header + footer only; no emoji code points
+  (`!/[\u{1F7E8}-\u{1F7E9}]/u`); no em-dash and no middle-dot;
+  determinism.
+- `tests/scoreScreen.test.js` (new file) — 8 tests: button
+  rendered when `result.history` non-empty; not rendered when
+  empty; not rendered when missing; click invokes
+  `navigator.clipboard.writeText` once with text containing
+  `Word 1:` and the score, no emoji; falls back to `window.prompt`
+  on rejection; label flips to `Copied!` after success; alt-text
+  click does NOT flip the primary Share button label
+  (independence); regression test that the primary Share button
+  still copies emoji-grid output.
+- `tests/homeScreen.test.js` — 5 new tests appended to the
+  existing `popover — share` block: button rendered when
+  `record.history` non-empty; not rendered without history;
+  not rendered when history empty; click writes plaintext
+  containing the entry's date words and score, no emoji; falls
+  back to `window.prompt` on rejection (prompt text contains
+  score and `Word 1:`); switch-to-different-cell after copying
+  alt-text resets the button label back to `Copy alt text`.
+
+#### Documentation
+- `src/docs.md` — replaced the single "Share text contract" Core
+  Implementation bullet with five bullets covering the dual-
+  serializer contract, the emoji-grid form, the emoji-form
+  Twitter-budget truncation, the alt-text form (header shapes,
+  per-row sentence shapes, footer formatting, time/date
+  humanization, singular forms), and the alt-text truncation
+  parity with the emoji form. Added two Things-to-Know entries
+  on (a) why two serializers / two buttons rather than auto-
+  detection or a merged share (with explicit out-of-scope items)
+  and (b) the alt-text pronunciation invariants (no emoji, no
+  em-dash, no middle-dot, no raw `YYYY-MM-DD`).
+- `src/components/docs.md` — new Core Implementation bullet
+  "Share surfaces — dual buttons" capturing the cross-component
+  invariant. Rewrote the HomeScreen popover Share-button bullet
+  to cover both buttons (`buildSelectedShareArgs` helper, both
+  copy-feedback flags resetting on close/cell-switch, race guard
+  applies to both handlers). Rewrote the ScoreScreen bullet
+  with `canCopyAlt`, `buildShareArgs`, parallel `copied` /
+  `copiedAlt` refs, and the form-specific streak-suffix
+  separators.
+- `RESEARCH-NOTES.md` — appended a "Screen-reader alt-text share
+  variant (v15 commit)" section covering the wa11y.co format
+  research, pronunciation gotchas (em-dash / middle-dot /
+  YYYY-MM-DD), Twitter alt-text 1000-char limit, the
+  head-3/tail-3 truncation parity decision, edge cases (root-
+  word entries skip the "carried" clause, sub-minute times,
+  streak 1 suppression, singular vs plural elision), the
+  decision rejection of auto-detection (per
+  `marcozehe.de`), and explicit out-of-scope items (TTS file,
+  per-platform alt variants).
+
+#### Verified
+- `npm test` — 236/236 passing (was 202; +20 share + 8 new
+  scoreScreen file + 5 homeScreen + 1 regression on the primary
+  Share button = 34 new tests).
+- `npm run build` — production bundle builds cleanly in 0.66 s.
+  CSS unchanged at 9.26 kB. JS at 106.14 kB raw / 40.56 kB
+  gzipped (was 103.92 kB / 40.02 kB; +2.22 kB raw / +0.54 kB
+  gzipped for the new exported function plus two button
+  handlers).
+
+### `feat/initial-game` — In-game missed-draw penalty feedback (this commit)
+
+Surfaces the existing `−10` missed-draw penalty as a real-time
+warning in the existing accessible feedback live region after every
+"Draw tile" click. The application spec calls out penalising "asking
+for new letters when existing anagrams exist on the board"; the
+penalty was implemented (`scoring.js#hasLoosePoolAnagram`,
+`finalScore = wordPoints − 10·missedDrawCount`) and the live score
+already reflected it (it drops by 10 on a missed draw), but the
+*cause* was hidden until the score screen — the player saw the
+score drop with no labelled attribution, defeating the penalty's
+pedagogical intent. After this commit, when `missedDrawCount` ticks
+up on a draw, the existing `<div class="feedback" role="status"
+aria-atomic="true">` shows `Penalty: a word was available. −10
+points.` in a yellow palette parallel to the existing success/error
+classes. Non-missed draws clear feedback (existing behaviour).
+
+#### What changed
+- `src/components/GameScreen.vue` — `onDraw()` now snapshots
+  `prevMissed = game.value.missedDrawCount` before calling
+  `drawTile`, then compares `next.missedDrawCount > prevMissed`. On
+  true: sets `feedback = { type: 'warning', text: 'Penalty: a word
+  was available. −10 points.' }`. On false: clears feedback (existing
+  behaviour). The diff is computed client-side — the `drawTile`
+  signature is intentionally unchanged.
+- `style.css` — new `.feedback.warning` rule using the project's
+  accent yellow (`#b59f3b` text on tinted background, parallel to
+  the existing `.feedback.success` and `.feedback.error` rules
+  byte-for-byte).
+- No domain-module changes (`src/scoring.js`, `src/game.js`,
+  `src/pool.js`, `src/anagramRules.js`, `src/staging.js`,
+  `src/share.js`, `src/storage.js`, `src/dictionary.js`,
+  `src/trivialInflection.js`, `src/dateKey.js`, `src/tiles.js`,
+  `src/prng.js` are untouched). No `ScoreScreen.vue` change. No new
+  dependencies. No storage shape change. No `SCHEMA_VERSION` bump.
+
+#### A11y choices (researched against industry sources)
+- **`role="status"` preserved.** Did not switch to `role="alert"` —
+  alert is hostile for sub-optimal-play feedback (interrupts SR
+  mid-typing). The penalty is informational, not safety-critical.
+- **Lead with textual `Penalty:` prefix.** Color-only severity
+  (yellow) violates WCAG 1.4.1 (Use of Color); the word `Penalty`
+  carries the semantic for color-blind and SR users.
+- **Unicode minus `−` (U+2212), NOT hyphen-minus `-` (U+002D).** SRs
+  read U+2212 as "minus 10" reliably; hyphen-minus reads as "dash 10"
+  or is skipped. Test #4 locks this invariant.
+- **No em-dash in the warning text.** Em-dash (U+2014) reads
+  unreliably across SRs (silent on VoiceOver, "dash" on JAWS). The
+  one-shot `reasonText('no-new-play')` error elsewhere in
+  `GameScreen.vue` still uses an em-dash because it is not
+  recurring; the missed-draw warning fires up to ~20× per game. Test
+  #5 locks this invariant.
+- **Contrast.** `#b59f3b` on `#121213` is ~7.3:1 (AA normal text,
+  AAA large text), per WebAIM Contrast Checker.
+
+#### Tests added
+- `tests/gameScreenInteraction.test.js` — new
+  `describe('GameScreen draw — missed-draw feedback', …)` block, 6
+  tests asserting visible behaviour through the rendered DOM:
+  - "shows a warning message after a draw when the loose pool had a
+    possible word" (mount with `loose: ['c','a','t']` → `cat` is in
+    TWL06; click Draw; assert `.feedback.warning`, text contains
+    `Penalty` and `−10`).
+  - "clears feedback after a draw when the loose pool had no
+    possible word" (mount with `loose: ['x','y','z']`; pre-set
+    feedback via invalid submit; click Draw; assert
+    `feedback-empty`).
+  - "warning class is mutually exclusive with success and error".
+  - "uses the Unicode minus sign (U+2212), not the hyphen-minus
+    (U+002D)".
+  - "does not contain an em-dash (U+2014) in the warning text".
+  - "flips warning to success when a valid word is submitted after
+    the missed draw" (locks integration with the existing submit
+    feedback flow).
+
+#### Known limitation (documented in RESEARCH-NOTES.md)
+- Screen readers typically don't re-announce identical text on
+  `aria-live="polite"`. Consecutive identical "Penalty: a word was
+  available. −10 points." messages will only be announced once per
+  run of consecutive missed draws. Visual users still see the
+  yellow box on every draw. Considered fixes (clear-then-set via
+  `nextTick`, count interpolation, brief reset to null) deferred —
+  add complexity for marginal benefit; revisit if real SR users
+  report missing announcements.
+
+#### Verified
+- `npm test` — 242/242 passing (was 236; +6 new).
+- `npm run build` — production bundle builds cleanly in 0.68 s.
+  CSS now 9.34 kB (was 9.26 kB; +0.08 kB for the
+  `.feedback.warning` rule); JS at 106.27 kB raw / 40.61 kB
+  gzipped (was 106.14 kB / 40.56 kB; +0.13 kB raw for the
+  conditional warning assignment).
+
+### `feat/initial-game` — Allow play after the final draw (this commit)
+
+Closes a v1-era simplification that contradicted the canonical Snatch /
+Anagrams rule. Previously, `drawTile` ended the game immediately when
+the player drew the LAST face-down tile — the just-revealed letter was
+never playable. After this commit, the player can keep forming words
+from the freshly-revealed loose pool and ends the run manually via the
+existing "End game" button.
+
+#### Why
+Wikipedia's Anagrams article ("the game ends when all tiles are face
+up *AND* no further words can be formed") and the Bananagrammer Snatch
+write-up ("when all the tiles have been turned over, play continues
+until everyone decides that there are no more moves to make and quits")
+both say bag-empty is necessary but not sufficient. In Bananagrams, the
+last drawn letter is always usable; in solo word games (Spelling Bee,
+Wordscapes, Bookworm) ends are level-completion / time-box / explicit
+quit, never a yanked-rug auto-end on a depleted resource. Full citations
+in RESEARCH-NOTES.md "Allow play after the final draw (v17 commit)".
+
+#### What changed
+- `src/game.js` — `drawTile`: `ended: isFaceDownEmpty(next)` → `ended:
+  false`. The defensive `next === null` (poolDraw on empty pool) branch
+  still returns `ended: true` for safety; that path is unreachable
+  through normal play because `GameScreen`'s Draw button is gated by
+  `:disabled="!canDraw"` (`canDraw = faceDownCount > 0`). Removed the
+  now-dead `import { isFaceDownEmpty }` from `pool.js`.
+
+#### What did NOT change
+- No `.vue` template / CSS changes — `:disabled="!canDraw"` already
+  blocks redundant draws once face-down empties; the existing "End
+  game" button already routes to `finishGame`.
+- No persistence / dictionary / lemma / share / scoring changes.
+- No new dependencies. No `SCHEMA_VERSION` bump (no persisted shape
+  change).
+- `pool.js#isFaceDownEmpty` is still exported — it's no longer
+  imported by `game.js`, but it's still public API and used elsewhere
+  in tests; no need to delete.
+
+#### Tests added
+- `tests/game.test.js` — 2 new tests under `describe('drawTile', …)`:
+  - `does not end the game when drawing the last face-down tile`
+    (headline regression: seed `faceDown: ['z']`, `looseLetters:
+    ['x','q','j']`; assert `next.ended === false`,
+    `next.pool.faceDown` is empty, `next.pool.looseLetters` contains
+    `'z'`).
+  - `applies the missed-draw penalty when drawing the last face-down
+    tile` (locks the orthogonal penalty path against accidental
+    regressions: seed `faceDown: ['z']`, `looseLetters: ['c','a','t']`;
+    assert `next.missedDrawCount === 1`).
+- `tests/gameScreenInteraction.test.js` — 1 new test under a new
+  `describe('GameScreen draw button gating', …)` block:
+  - `disables the Draw button when the face-down pool is empty`
+    (locks the load-bearing invariant that `canDraw =
+    faceDownCount > 0` keeps the user from drawing past an empty bag,
+    which is what makes the defensive `next === null` branch in
+    `drawTile` unreachable through normal play). The enabled-when-
+    tiles-remain mirror is implicit in every other test that clicks
+    Draw under the default `makeGame` (`faceDown: ['x','y','z']`).
+- The pre-existing `marks game as ended when face-down was empty`
+  test (defensive `next === null` path, seeded `faceDown: []`) is
+  unchanged and still passing.
+
+#### Documentation
+- `src/docs.md` — Game-lifecycle bullet rewritten to describe the new
+  manual-end behaviour with the defensive-branch caveat and a cross-
+  link to `GameScreen.vue#onEndGame`. New Things-to-Know entry:
+  "Bag-empty is necessary but not sufficient to end the game" with
+  the canonical-Snatch citations and a cross-link to the v17
+  RESEARCH-NOTES section. Notes that the missed-draw penalty path
+  still fires on every draw including the last.
+- `src/components/docs.md` — GameScreen bullet updated: `end` is
+  emitted on the explicit "End game" click (`onEndGame` →
+  `finishGame`), not on bag-exhaustion. `onDraw` still inspects
+  `next.ended` defensively but the branch is unreachable through
+  normal play.
+- `RESEARCH-NOTES.md` — appended a "Allow play after the final draw
+  (v17 commit)" section with sources, decision, tests, and out-of-
+  scope items.
+
+#### Verified
+- `npm test` — 245/245 passing (was 242; +3 new: 2 game + 1
+  gameScreenInteraction).
+- `npm run build` — production bundle builds cleanly in 0.6 s. JS at
+  106.22 kB raw / 40.60 kB gzipped (was 106.27 kB / 40.61 kB; −0.05
+  kB raw / −0.01 kB gzipped from removing the `isFaceDownEmpty`
+  import call site). CSS unchanged at 9.34 kB.
+
+### `feat/initial-game` — Native Web Share API on the primary Share buttons (this commit)
+
+Closes the unmentioned mobile UX gap noted while reviewing the spec
+for further work. Both primary "Share" surfaces (`ScoreScreen.onShare`
+and the `HomeScreen` day-detail popover's `shareSelectedDay`)
+previously called `navigator.clipboard.writeText` directly and showed
+a 2-second `Copied!` flash. On mobile (the dominant Wordle-share
+platform) this was a degraded UX: users saw `Copied!`, switched apps,
+and pasted manually. After this commit, both buttons dispatch through
+a shared `shareOrCopy(text)` helper that prefers the OS share sheet
+(`navigator.share({text})` — Messages, Twitter, WhatsApp, …) and
+falls back to clipboard, then `window.prompt`. Pure additive change:
+`generateShareText` / `generateShareAltText` signatures unchanged,
+share-text format unchanged, no domain modules, no CSS, no new
+dependencies, no `SCHEMA_VERSION` bump.
+
+#### What changed
+- `src/share.js` — new exported async helper
+  `shareOrCopy(text)` (~20 LOC). Returns one of four discriminant
+  strings: `'shared'` (`navigator.share` resolved), `'cancelled'`
+  (`AbortError` — user dismissed the OS share sheet),
+  `'copied'` (clipboard write resolved), `'prompted'`
+  (`window.prompt` fell through). Dispatch order: try
+  `navigator.share` only when it's a function *and* either
+  `navigator.canShare` is missing or `navigator.canShare({text})`
+  is `true`; on `AbortError`, return `'cancelled'` without falling
+  through (web.dev canonical pattern: user-cancellation isn't an
+  error condition); on any other share rejection, fall through to
+  clipboard; on clipboard rejection, fall through to
+  `window.prompt('Copy your result:', text)`.
+- `src/components/ScoreScreen.vue` — `onShare` rewritten to await
+  `shareOrCopy(text)` and only flip the `copied` ref to
+  `Copied!` when the helper returns `'copied'`. The other three
+  return values leave the button label untouched (the OS share
+  sheet, user-cancellation, and the prompt modal each surface
+  their own user feedback). `onCopyAltText` (the "Copy alt text"
+  button) intentionally NOT changed — stays clipboard-only by
+  design (different UX intent: export-to-personal-paste, not
+  share-externally).
+- `src/components/HomeScreen.vue` — `shareSelectedDay` rewritten
+  to await `shareOrCopy(text)` with the same `'copied'`-only
+  flip semantics. The pre-existing v12 race-guard pattern is
+  preserved verbatim: `startedFor = selectedIndex.value` is
+  captured before the await, and on the post-await branch
+  `selectedIndex.value !== startedFor` returns early before
+  flipping any flag. `copyAltSelectedDay` (the alt-text button)
+  intentionally NOT changed — same alt-text design rationale.
+
+#### What did NOT change
+- No template / CSS changes — the buttons keep their existing
+  `.action-btn` / `.day-popover-share` classes and labels (`Share`
+  → `Copied!` flip stays the only label change; `Share` → `Share`
+  for the OS-sheet and AbortError paths).
+- No new dependencies. No `web-share` library. The helper is ~20
+  LOC, no abstraction needed.
+- No domain-module changes (`src/game.js`, `src/scoring.js`,
+  `src/pool.js`, `src/anagramRules.js`, `src/dictionary.js`,
+  `src/staging.js`, `src/storage.js`, `src/trivialInflection.js`,
+  `src/dateKey.js`, `src/tiles.js`, `src/prng.js`,
+  `src/multiset.js` are untouched).
+- No `generateShareText` / `generateShareAltText` signature
+  changes. No share-text format change.
+- No optimistic UI. `shareOrCopy` awaits the share / clipboard
+  promise before reporting the outcome — flipping `Copied!`
+  before the await would be wrong if the user picks a target in
+  the share sheet (sheet completed, not clipboard) or cancels
+  (no share happened).
+- No `SCHEMA_VERSION` bump. No persisted-storage shape change.
+
+#### A11y / UX rationale (researched against industry sources)
+- **`AbortError` is not "fall through to clipboard"**. Per
+  [web.dev Web Share recipe](https://web.dev/articles/web-share):
+  "user cancellation isn't an error condition requiring
+  intervention." Falling through to clipboard would silently copy
+  text the user just declined to share — hostile UX. Test #2
+  in `describe('shareOrCopy', …)` locks this invariant.
+- **Browser support (April 2026):** full mobile (Safari iOS,
+  Chrome Android, Edge Android, Samsung Internet). Desktop:
+  Safari macOS yes, Chrome / Edge desktop yes (uses OS sheet on
+  Windows / ChromeOS / macOS), Firefox desktop unsupported
+  (clipboard fallback handles it). The single 3-tier fallback
+  chain works across all of these.
+- **HTTPS + transient user activation required** for both
+  `navigator.share` and `navigator.clipboard.writeText`. Both
+  call sites already are inside click handlers; the
+  `window.prompt` fallback covers HTTP-only scenarios.
+
+#### Tests added
+- `tests/share.test.js` — new `describe('shareOrCopy', …)` block,
+  7 tests asserting on the helper's return value (the public
+  contract) plus the externally-observable side effects:
+  - "returns 'shared' and does not call clipboard when
+    navigator.share resolves".
+  - "returns 'cancelled' without falling through to clipboard
+    when share rejects with AbortError" (locks the canonical-UX
+    invariant; clipboard NOT called).
+  - "falls back to clipboard on a non-Abort share rejection"
+    (NotAllowedError → clipboard called once with the original
+    text).
+  - "uses clipboard directly when navigator.share is undefined".
+  - "uses navigator.share when it is defined and canShare is
+    undefined" (locks the `typeof canShare !== 'function'`
+    branch — older Safari / lockdown variants).
+  - "skips share path and uses clipboard when canShare returns
+    false" (locks the gating; share NOT called).
+  - "falls back to window.prompt when share is absent and
+    clipboard rejects" (prompt receives the original text).
+- `tests/scoreScreen.test.js` — new `describe('ScoreScreen — Share
+  button native Web Share path', …)` block, 3 tests asserting on
+  DOM-visible button-label behaviour:
+  - "uses navigator.share when available and does NOT flip
+    'Copied!'" (`Share` stays `Share`; clipboard NOT called).
+  - "falls back to clipboard and flips 'Copied!' when share
+    rejects with non-Abort error" (`Share` → `Copied!`;
+    clipboard called once).
+  - "does NOT flip 'Copied!' when user cancels the share sheet
+    (AbortError)" (`Share` stays `Share`; clipboard NOT called).
+- `tests/homeScreen.test.js` — new `describe('HomeScreen
+  day-detail popover — Share button native Web Share path', …)`
+  block, 3 tests covering the same three scenarios for the
+  popover Share button. All operate against the rendered
+  `[role="dialog"]` panel via the same Teleport pattern used
+  elsewhere.
+- All pre-existing share / ScoreScreen / HomeScreen tests
+  (clipboard-only path, alt-text buttons, popover dismiss
+  invariants, race guard) untouched and still passing — their
+  `afterEach` blocks now also delete `navigator.share` /
+  `navigator.canShare` so the existing assertions still
+  exercise the clipboard fallback.
+
+#### Documentation
+- `src/docs.md` — Core Implementation gains a "Share dispatch
+  helper — `shareOrCopy`" bullet documenting the four return
+  values, dispatch order, and AbortError short-circuit. Two new
+  Things-to-Know entries: "AbortError is treated as a successful
+  no-op, not as fall-through" (rationale + test cross-link) and
+  "Alt-text share buttons stay clipboard-only by design"
+  (export-to-personal-paste vs share-externally distinction).
+- `src/components/docs.md` — "Share surfaces — dual buttons"
+  cross-component invariant extended to make explicit that the
+  primary Share button on both surfaces dispatches through
+  `shareOrCopy`, while the secondary Copy alt text stays
+  clipboard-only. ScoreScreen and HomeScreen popover bullets
+  rewritten to reflect the conditional `'copied'`-only flip
+  semantics on the primary Share path; the alt path documented
+  as the direct clipboard call.
+- `RESEARCH-NOTES.md` — appended a "Native Web Share API
+  integration (v18 commit)" section with the gap, browser
+  support matrix, AbortError rationale, permission requirements,
+  the implementation shape, the return-value-to-UX-feedback
+  table, test mocking patterns for `navigator.share` /
+  `navigator.canShare` / `navigator.clipboard` under
+  Vitest+happy-dom, scope decisions, out-of-scope items, and
+  source citations.
+
+#### Verified
+- `npm test` — 258/258 passing (was 245; +7 shareOrCopy + 3
+  ScoreScreen + 3 HomeScreen). All pre-existing tests still
+  passing.
+- `npm run build` — production bundle builds cleanly in 0.63 s.
+  CSS unchanged at 9.34 kB. JS at 106.45 kB raw / 40.74 kB
+  gzipped (was 106.22 kB / 40.60 kB; +0.23 kB raw / +0.14 kB
+  gzipped for the new exported helper plus two simplified call
+  sites).
+- End-to-end native-share UX (OS sheet on iOS / Android,
+  AbortError dismissal, clipboard fallback on Firefox desktop)
+  is verifiable manually but not driven from CLI; the test
+  suite covers the dispatch logic and the per-button UI
+  feedback at the component-DOM level.
+
+### `feat/initial-game` — Steal-aware missed-draw penalty (this commit)
+
+Closes a long-standing spec compliance gap. The application spec
+(`APPLICATION-SPEC.md`) literally uses `Rook + B → Brook` as the
+canonical "Valid anagram" example, then says: "We want to penalize
+players for asking for new letters when existing anagrams exist on the
+board." Until this commit, `src/scoring.js#hasLoosePoolAnagram`
+enumerated only 3- to 8-letter dictionary words formed from the **loose
+pool alone** — players who piled up parent words and then drew without
+trying steals avoided the `−10` penalty entirely, defeating the
+penalty's pedagogical intent. After this commit, drawing a tile when a
+single-parent steal was available also costs `−10`, and the in-game
+live-region warning differentiates "loose-pool word" vs "steal" so the
+player can attribute the live `game.score` drop to the right kind of
+missed play.
+
+#### What changed
+- `src/scoring.js` — new exported function
+  `hasMissedAnagram(pool, dict)` returning a discriminator
+  `'loose' | 'steal' | null`. Calls existing
+  `hasLoosePoolAnagram(pool.looseLetters, dict)` first; returns
+  `'loose'` if true. Else iterates each parent word in
+  `pool.words` one at a time (single-parent steals only — the
+  loop never enumerates multi-parent subsets) and for each
+  `(parent × loose-subset of size 1..MAX_LOOSE_SUBSET=8)`
+  combination checks the combined letter signature against
+  `dict.signatureIndex` for any candidate that grows the parent
+  (must be strictly longer, must not be a trivial inflection per
+  `isTrivialInflection`, must not be profane per `isProfane`).
+  Returns `'steal'` on first hit; else `null`. Implementation
+  reuses `letterSignature`, `signatureIndex`,
+  `isTrivialInflection`, `isProfane`, and the existing
+  `subsetSignatures` generator. New imports: `isProfane` from
+  `./anagramRules.js` and `isTrivialInflection` from
+  `./trivialInflection.js`. Existing `hasLoosePoolAnagram` kept
+  exported and unchanged — it remains a useful primitive and is
+  still directly tested.
+- `src/game.js` — `drawTile`'s
+  `hasLoosePoolAnagram(game.pool.looseLetters, dict)` boolean check
+  replaced with `hasMissedAnagram(game.pool, dict) !== null`. Same
+  boolean shape, just delegates to the broader detector. Import
+  line updated. The `missedDrawCount` field semantics are
+  unchanged — still a non-discriminated count incremented by 1 on
+  any missed-anagram draw.
+- `src/components/GameScreen.vue` — `onDraw()` now calls
+  `hasMissedAnagram(game.value.pool, props.dict)` BEFORE `drawTile`
+  to obtain the discriminator, then renders differentiated warning
+  copy: `'steal'` → `'Penalty: a steal was available. −10 points.'`;
+  `'loose'` → existing `'Penalty: a word was available. −10 points.'`
+  (unchanged); `null` → cleared feedback. The post-draw `prevMissed`
+  snapshot diff was removed since the pre-draw discriminator is now
+  the canonical source of truth for the warning text. Import line
+  updated. Pronunciation invariants from v17 (Unicode minus `−`
+  U+2212, no em-dash, no hyphen-minus) carried forward verbatim.
+
+#### What did NOT change
+- No domain-module changes outside `src/scoring.js` /
+  `src/game.js` (`anagramRules.js`, `pool.js`, `staging.js`,
+  `dictionary.js`, `trivialInflection.js`, `share.js`,
+  `storage.js`, `multiset.js`, `prng.js`, `tiles.js`, `dateKey.js`
+  are untouched).
+- No `canFormWord` / submit-time legality changes. The detector is
+  a SEPARATE check that mirrors legality for a different purpose
+  (penalty triggering). Submit-time still accepts multi-parent
+  merges (`rat + sin → strain`); the asymmetry is intentional.
+- No `SCHEMA_VERSION` bump. No persisted-storage shape change.
+  Past records on disk remain valid (`missedDrawCount` is still a
+  non-discriminated count, computed and stored at game-end).
+- No share-text format change. The footer doesn't mention
+  missed-draw kind.
+- No new dependencies.
+- No CSS changes (existing `.feedback.warning` rule covers both
+  warning variants).
+
+#### A11y / fairness rationale (researched against industry sources)
+- **Single-parent steals only.** Multi-parent merges are too
+  hard for human players to spot under draw-decision time
+  pressure (Jeff Kaufman, "Stealy Anagrams":
+  https://www.jefftk.com/p/stealy-anagrams — even in the
+  multiplayer version "the game moves slowly because of working-
+  memory constraints" on multi-parent merges). Penalizing for
+  missing them would feel unfair. The asymmetry between submit-
+  time legality (multi-parent allowed) and penalty-time
+  detection (single-parent only) is deliberate and is encoded in
+  the loop structure of `hasMissedAnagram` (one parent at a
+  time), not as a separately-toggleable cap.
+- **Loose path takes priority over steal path** when both apply.
+  Loose-pool plays are conceptually simpler and more likely the
+  player's actual miss; the warning text "a word was available"
+  is gentler than "a steal was available." Locked by test #5 in
+  the new `hasMissedAnagram` block.
+- **Detector mirrors `canFormWord` legality** — only flags plays
+  the player could legally have made. Trivial-inflection check
+  (`pod + s → pods` returns `null`); profanity skip (defensive —
+  TWL06 is filtered, but `bad-words` may still flag candidates);
+  length-grow rule structurally satisfied by enumeration starting
+  at loose-subset-size = 1.
+- **Magnitude unchanged** at `−10`. Per industry research (solo
+  word games rarely penalize missed plays at all — Squaredle,
+  Word Hunt, Wordscapes, Spelling Bee), our `−10` is already on
+  the unusual end. Don't stack penalties per-mechanism — one
+  `−10` per draw whether the missed play was loose-pool, a
+  steal, or both.
+- **Differentiated warning copy** is research-backed (Squaredle
+  pattern: specific-but-not-spoiling hints teach better than
+  generic ones). The two variants share structure ("Penalty:
+  a … was available. −10 points.") and pronunciation
+  invariants.
+
+#### Tests added
+- `tests/scoring.test.js` — new
+  `describe('hasMissedAnagram', …)` block, 6 tests covering: (a)
+  loose-only path returns `'loose'`; (b) single-parent steal
+  returns `'steal'` (`rook + b → brook`); (c) no-play returns
+  `null`; (d) trivial-inflection-only steal NOT flagged
+  (`pod + s → pods` — picked because the only candidate at the
+  signature is the plural, so no non-trivial alternative
+  exists); (e) loose path takes priority over steal when both
+  exist (`{loose:['c','a','t','b'], words:['rook']}` returns
+  `'loose'`, not `'steal'`); (f) a steal that uses more than
+  one loose tile is detected (`fin + e + d → fined`). All six
+  tests use a small `pool({loose, words})` factory and
+  black-box the function.
+- `tests/game.test.js` — 1 new test under `describe('drawTile',
+  …)`: `drawTile` increments `missedDrawCount` when a single-
+  parent steal was available (`{loose:['b'],
+  words:[{word:'rook'}]}`).
+- `tests/gameScreenInteraction.test.js` — 1 new test under the
+  existing `describe('GameScreen draw — missed-draw feedback',
+  …)` block: warning text contains the substring `'steal'` and
+  `'−10'` after a draw when only a steal (not a loose-pool
+  word) was the missed play (mounted with
+  `{loose:['b'], words:['rook']}`).
+
+#### Documentation
+- `src/docs.md` — Scoring bullet rewritten to describe the
+  `hasMissedAnagram` discriminator, its delegation to
+  `hasLoosePoolAnagram` for the loose path, and its single-
+  parent steal enumeration with trivial-inflection / profanity /
+  length-grow filters. Three new Things-to-Know entries: the
+  single-parent-only fairness asymmetry (vs `canFormWord`
+  legality), the detector-mirrors-legality invariant, and the
+  loose-path priority over steal-path. Subset-enumeration cap
+  entry extended to note the steal branch uses the same
+  `MAX_LOOSE_SUBSET = 8` cap. Bag-empty entry updated to
+  reference `hasMissedAnagram` instead of the prior
+  `hasLoosePoolAnagram`.
+- `src/components/docs.md` — GameScreen missed-draw-feedback
+  bullet rewritten to describe the pre-draw `hasMissedAnagram`
+  call as the canonical source of warning text, the
+  differentiated copy (`'a steal was available'` vs `'a word was
+  available'` vs cleared), and a cross-reference to the
+  pronunciation invariants.
+- `RESEARCH-NOTES.md` — appended a "Steal-aware missed-anagram
+  penalty (v19 commit)" section with the spec gap, canonical-
+  rule research (Wikipedia / Bananagrammer / Letter Tile
+  Games), solo-puzzle precedent (Squaredle / Word Hunt /
+  Wordscapes / Connections / Spelling Bee), the multi-parent
+  fairness limit citation, the legality-mirroring rules,
+  performance enumeration analysis, the API shape (return-
+  value table), the `drawTile` integration sketch, the UX
+  warning copy, the test plan, and out-of-scope items.
+
+#### Verified
+- `npm test` — 266/266 passing (was 258; +6 hasMissedAnagram +
+  1 game integration + 1 UI). All pre-existing tests still
+  passing.
+- `npm run build` — production bundle builds cleanly. CSS
+  unchanged at 9.34 kB; JS gains ~0.4 kB raw for the new
+  `hasMissedAnagram` + `hasSingleParentSteal` helpers and the
+  differentiated warning branch.
+- End-to-end gameplay (mount the dev server, form a parent
+  word, draw a tile when a steal is available, see the
+  differentiated warning copy in the feedback box) is
+  verifiable manually but not driven from CLI; the test suite
+  covers the dispatch logic and the per-button DOM-level UI
+  feedback.
+
+## Open follow-ups (next commits)
+
+- Score-tier color heatmap on calendar cells (currently boolean
+  filled/hollow). Add only if play-tester feedback says scores are hard
+  to interpret at a glance.
+- Streak protection / freeze tokens (cosmetic feature; YAGNI for now).
+- A11y polish round 2: keyboard activation tests in a real browser
+  (Playwright) instead of happy-dom; live-region announcements verified
+  against an actual screen reader; reduce score-region announcement
+  cadence if play-tester feedback says it's chatty. Missed-draw
+  warning re-announcement on consecutive identical penalties (clear-
+  then-set via nextTick) deferred — visual indicator suffices for v0.
+- Mobile composition-input support for the trail-based input model
+  (Android Chrome / GBoard `insertCompositionText` currently demotes
+  the trail to all-typed entries, losing identity).
