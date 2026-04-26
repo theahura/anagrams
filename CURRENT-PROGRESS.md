@@ -1082,10 +1082,132 @@ the model; the text input is a transient editor for the next entry.
   which trigger demote — losing identity. The game is desktop-first
   and English-only; mobile composition support is deferred.
 
+### `feat/initial-game` — Twitter-budget share-grid truncation (this commit)
+
+Closes the open follow-up "Truncate share grid for very long runs
+(Twitter 280-char limit) — not hit by typical games but possible."
+Marathon Anagrams runs (25–30 words with steals) silently get cut by
+Twitter, making the share look broken (mid-row truncation, missing
+footer). After this commit, over-budget grids render as the first 3
+emoji rows + a single `… +N more` line + the last 3 emoji rows;
+header and footer are emitted verbatim. Common-case daily plays
+(5–10 words) bypass the truncation branch and emit byte-identical
+output to the prior implementation.
+
+#### What changed
+- `src/share.js`:
+  - New module-level constants `MAX_WEIGHTED_LENGTH = 260`,
+    `HEAD_KEEP = 3`, `TAIL_KEEP = 3` (not exported).
+  - New private helper `weightedLength(text)` — iterates by code
+    point (`for (const ch of text)`) and applies the rule
+    `cp <= 0x7F ? 1 : 2` (ASCII = 1 weight, everything else = 2).
+    Conservative over-approximation of the `twitter-text` v3 weighted
+    model: emoji squares 🟩 / 🟨 (U+1F7E9 / U+1F7E8) score 2 weight
+    each (correct); rare punctuation like the em-dash `—` and middle-
+    dot `·` over-count by 1 each (≤ 3 weight total per share, well
+    inside the 20-weight buffer between our 260 budget and Twitter's
+    280 hard limit).
+  - New private helper `assemble(header, rows, footer)` — extracted
+    from the existing assembly logic so the truncated and untruncated
+    paths share one format definition. No behavior change.
+  - `generateShareText` gains a single conditional branch: if
+    `rows.length > HEAD_KEEP + TAIL_KEEP` AND
+    `weightedLength(fullText) > MAX_WEIGHTED_LENGTH`, splice
+    `[...rows.slice(0,3), '… +N more', ...rows.slice(-3)]` and
+    re-`assemble`. Otherwise return the full assembled text.
+- No domain-module changes (`game.js`, `pool.js`, `scoring.js`,
+  `anagramRules.js`, `staging.js`, `storage.js`, `dictionary.js`,
+  `trivialInflection.js`, `dateKey.js`, `tiles.js`, `prng.js` are all
+  untouched). No `.vue` template changes; popover Share button on
+  HomeScreen and Score screen Share button continue calling
+  `generateShareText` with the same arguments — truncation flows
+  through automatically.
+- No CSS changes. No new dependencies. No `npm i twitter-text` —
+  twitter-text is a 100kB+ dependency we'd be importing for ~5
+  lines of weighting logic, so we open-coded the conservative
+  approximation instead.
+- No `SCHEMA_VERSION` bump. Persisted `history` arrays in
+  localStorage round-trip through the same truncation when popover-
+  replayed.
+
+#### Why head + tail + `… +N more`, not re-encoding
+Long-form Wordle variants like `64ordle.au` solve the 280-char
+problem by re-encoding each guess as a single tier-color emoji
+(packing 64 plays into ~64 emoji). We deliberately rejected that
+approach for Anagrams: the per-row 🟨/🟩 split is the share's most
+informative signal — it shows how much of each play was *stolen*
+from existing words vs *newly added* — and collapsing each row to a
+single tier-emoji throws that away. Head + tail + count summary
+keeps the structural meaning of the shown rows intact and the
+non-Wordle-variant convention (truncation) is the right trade-off
+for a game whose share text is small per row but variable in count.
+Source citations and the full design write-up live in
+RESEARCH-NOTES.md under "Share-grid truncation for Twitter 280-char
+limit (v14 commit)."
+
+#### Tests added
+- `tests/share.test.js` — new `describe('generateShareText —
+  truncation', …)` block, 8 tests:
+  - "does not truncate when history fits within the share budget"
+    (6 four-letter words; output contains all 6 rows verbatim, no
+    `more` text).
+  - "truncates when history overflows the share budget" (30 six-
+    letter rows; output has ≤ 6 emoji rows, contains `+24 more`).
+  - "preserves the header verbatim when truncated".
+  - "preserves the full footer (Longest, Time, Streak) verbatim
+    when truncated".
+  - "keeps first 3 rows then elision then last 3 rows in original
+    order when truncated" — uses uniquely-shaped emoji rows (head
+    via parents `[]`/`['ab']`/`['abc']`, tail via parents `['x']`/
+    `['xy']`/`['xyz']`) so each `rowFor(entry)` produces a distinct
+    string. Asserts via `text.split('\n').filter(emoji-only)` plus
+    `findIndex` for the elision marker.
+  - "truncated output stays within Twitter weighted-length 280" —
+    independently re-implements the conservative weight rule in
+    the test file (5 lines) and asserts on the returned string.
+  - "drops just one row when history has exactly 7 overflowing
+    rows" (7 eighteen-letter rows → `+1 more`). The 30-row case
+    above (`+24 more`) and this 7-row case bracket the dropped-
+    count formula range.
+  - "does not truncate when history has 6 or fewer rows even if
+    oversized" (6 fifteen-letter rows; rows.length ≤ HEAD+TAIL so
+    truncation suppressed even though weighted length may exceed
+    260).
+- All 14 previously-existing `share.test.js` tests pass without
+  modification — they exercise small histories that don't hit the
+  truncation path.
+
+#### Documentation
+- `src/docs.md` — extended the "Share text contract" bullet to note
+  centralised assembly via `assemble()`. Added a new "Share text
+  Twitter-budget truncation" Core-Implementation bullet covering
+  the budget constant, kept-counts, elision format, suppression
+  rule, and conservative weighting helper. Added a Things-to-Know
+  entry "Share-text truncation chose head+tail over re-encoding to
+  preserve the per-row 🟨/🟩 split" capturing the design rationale,
+  the byte-identical guarantee for kept rows, and the
+  test-observable-behaviour-not-constants policy.
+- `src/components/docs.md` — extended the HomeScreen popover
+  Share-button bullet to note that truncation flows through
+  automatically for past-day shares (no popover-specific handling),
+  cross-referencing `src/docs.md`.
+- `RESEARCH-NOTES.md` — appended a "Share-grid truncation for
+  Twitter 280-char limit (v14 commit)" section with `twitter-text`
+  v3 spec citations, long-form-Wordle precedent (64ordle, etc.),
+  the head-vs-tail design decision, the conservative
+  ASCII-vs-non-ASCII weighting rationale, full test plan, and
+  out-of-scope items.
+
+#### Verified
+- `npm test` — 202/202 passing (was 194; +8 new). 14 prior
+  `share.test.js` tests untouched and still passing.
+- `npm run build` — production bundle builds cleanly in 0.7 s.
+  CSS unchanged at 9.26 kB. JS at 103.92 kB raw / 40.02 kB gzipped
+  (was 103.64 kB / 39.89 kB; +0.28 kB raw for the truncation
+  branch + helpers).
+
 ## Open follow-ups (next commits)
 
-- Truncate share grid for very long runs (Twitter 280-char limit) — not
-  hit by typical games but possible.
 - Score-tier color heatmap on calendar cells (currently boolean
   filled/hollow). Add only if play-tester feedback says scores are hard
   to interpret at a glance.
@@ -1097,3 +1219,6 @@ the model; the text input is a transient editor for the next entry.
 - Mobile composition-input support for the trail-based input model
   (Android Chrome / GBoard `insertCompositionText` currently demotes
   the trail to all-typed entries, losing identity).
+- Aria-label "alt text" share variant for screen readers (per Slate's
+  Wordle-accessibility piece, wa11y.co does this for Wordle). Real
+  concern but separate from the Twitter truncation work.

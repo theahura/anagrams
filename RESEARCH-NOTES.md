@@ -1595,3 +1595,161 @@ greedy-fallback for `kind:'typed'` residue. `submitWord` keeps its
 existing string-based contract (no signature change). All other
 modules (`anagramRules`, `game`, `pool`, `scoring`, `share`,
 `storage`) are untouched.
+
+## Share-grid truncation for Twitter 280-char limit (v14 commit)
+
+Open follow-up from CURRENT-PROGRESS.md: "Truncate share grid for very
+long runs (Twitter 280-char limit) — not hit by typical games but
+possible." Today `generateShareText` emits one emoji row per word in
+`history`. For typical daily plays (5–10 words) this is well under the
+limit; for marathon runs (25–30 words with steals) it overflows and
+Twitter silently truncates — the share looks broken (cut row, missing
+footer).
+
+### Twitter character-counting (knowledge-researcher summary)
+
+Twitter/X uses the official `twitter-text` v3 weighted-length model
+([X docs](https://docs.x.com/fundamentals/counting-characters),
+[twitter/twitter-text](https://github.com/twitter/twitter-text),
+[v3 config](https://github.com/twitter/twitter-text/blob/master/config/v3.json)):
+
+- `maxWeightedTweetLength = 280`. `defaultWeight = 200` (i.e. 2 weight
+  units per char). Discounted weight `100` (1 unit) granted only to
+  BMP code points in `[0–4350], [8192–8205], [8208–8223],
+  [8242–8247]` — basic Latin, common Latin-extension, CJK punctuation,
+  and a few general-punctuation ranges.
+- U+1F7E9 (🟩) and U+1F7E8 (🟨) live in the Geometric Shapes Extended
+  block at U+1F7E0–1F7EB — supplementary plane, far outside the
+  discounted ranges. Each costs **2 weight units**.
+- Counting is on code points after NFC normalization, not UTF-16 code
+  units. ZWJ-joined sequences (👨‍👩‍👧 etc.) sum across components and
+  are much heavier (7–11 units). We use plain colored squares only —
+  exactly 2 weight each.
+- For our format (~50 chars header/footer, all ASCII or near-ASCII +
+  emoji rows): budget is `280 − 50 ≈ 230` weight, which is **~115
+  emoji squares**. Targeting `260` total leaves a 20-weight safety
+  margin for newlines, em-dash, middle-dots, and the elision line.
+
+### Long-form Wordle precedent
+
+- Wordle/Quordle/Octordle never hit the limit (max 30 squares).
+- Sedecordle (16-word) is already pushing the limit with two keycap
+  digits per guess.
+- 64ordle.au explicitly rejected per-guess rendering ("128 keycap
+  emoji is way too much for Twitter/Bluesky") and switched to **one
+  emoji per word, color-tier encoded**. Total ≤ 64 emoji + few lines
+  of text fits one tweet.
+- **No mainstream Wordle variant uses "+N more" truncation.** The
+  community convention is **re-encoding to a denser representation**.
+  Truncation is an "un-Wordle" choice.
+
+### Decision: truncation, not re-encoding
+
+Re-encoding is rejected for Anagrams because the per-row format
+encodes legible information — the 🟨/🟩 split per word shows how much
+the player stole vs added. Collapsing each word to a single
+score-tier emoji loses that signal. We accept that we're departing
+from the Wordle community convention.
+
+The truncation pattern follows general UX/accessibility guidance
+(Baymard, Slate on Wordle accessibility):
+
+- **Head + tail** elision is the convention readers understand: keep
+  the first few rows (game opening), keep the last few rows
+  (climax/longest-word play). Avoid "smart" selection (e.g.,
+  longest-word-first) — surprising for cross-player comparison.
+- **Plain text "+ N more words" line** as the elision signal. Screen-
+  reader-friendly. Costs ~10 weight.
+- **Hardcode the cap** — `MAX_WEIGHTED_LENGTH = 260`. Configurability
+  is YAGNI for this domain.
+
+### Algorithm
+
+1. Build header, rows, footer as today.
+2. Compute weighted length of the assembled output via a
+   `weightedLength` helper.
+3. If `≤ MAX_WEIGHTED_LENGTH` OR `rows.length ≤ HEAD_KEEP +
+   TAIL_KEEP` (== 6), return as-is. (Can't help: dropping fewer than
+   1 row is a no-op.)
+4. Otherwise, drop the middle: keep `rows[0..3]` + elision +
+   `rows[-3..]`. Elision line: `… +N more` where `N = rows.length −
+   6`.
+
+### `weightedLength` simplification
+
+A faithful port of twitter-text would need ~10 lines of range-membership
+code. We simplify to:
+
+```js
+function weightedLength(text) {
+  let len = 0;
+  for (const ch of text) {            // iterate by code point
+    const cp = ch.codePointAt(0);
+    len += cp <= 0x7F ? 1 : 2;
+  }
+  return len;
+}
+```
+
+ASCII = 1 weight, everything else = 2. This **over-counts** a few
+chars in our format (em-dash `—` U+2014, middle-dot `·` U+00B7) by 1
+weight each. With 1 em-dash and at most 2 middle-dots in any run, we
+over-count by ≤ 3 weight. That's safely inside the 20-weight buffer
+between 260 and Twitter's 280 hard limit. Conservative bias is the
+right side to err on for a defensive truncator — we'd rather truncate
+slightly early than ship a tweet that gets silently cut.
+
+### Tests (TDD plan)
+
+`tests/share.test.js` — new `describe('generateShareText —
+truncation', …)` block:
+
+1. **No truncation when history fits**: 6 rows of 4 letters → output
+   contains all 6 rows verbatim, no elision text.
+2. **Truncates when history overflows**: 30 rows of 6 letters each
+   (heavy overflow) → output has at most 6 emoji rows; elision line
+   `+24 more` (or whatever count) present.
+3. **Preserves header verbatim** when truncated.
+4. **Preserves footer verbatim** when truncated (longest length, time,
+   streak suffix all intact).
+5. **First 3 + last 3 rows preserved** in original left-to-right
+   order: `output.indexOf(rows[0]) < output.indexOf(rows[1]) <
+   output.indexOf(rows[2]) < elision < ... < output.indexOf(rows[-1])`.
+6. **Elision count reflects `rows.length − 6`**.
+7. **Truncated output stays under Twitter's 280 weight** (asserted via
+   the weight rule applied in the test itself, independently
+   computed).
+8. **Edge: exactly 7 rows, 1 to drop** → elision `+1 more`.
+9. **Edge: exactly 6 rows, no truncation possible** → all 6 rows
+   preserved even if the result is over 260 weight (we accept it; we
+   can't help). Also asserts no elision text.
+10. **Pre-existing tests unchanged**: all 14 current `share.test.js`
+    tests continue to pass (small histories, streak suffix, random
+    mode, deterministic output). The truncation path is opt-in by
+    overflow; non-overflow plays bypass it.
+
+### What NOT to change
+
+- `src/game.js` — no signature change; `endGame` still emits
+  `history` exactly as before.
+- `src/components/ScoreScreen.vue` — no template change.
+- `src/components/HomeScreen.vue` — popover Share button reuses the
+  same `generateShareText` function; truncation flows through.
+- No new dependencies. No `npm i twitter-text`. Twitter's library is
+  100kB+ and we only need ~5 lines of weighting logic.
+- No `MAX_WEIGHTED_LENGTH` parameter exposed on the public API.
+  Hardcoded constant. (Tests assert behavior, not the constant.)
+
+### Out of scope (intentional)
+
+- Faithful twitter-text weighting (range tables). Conservative ASCII-
+  vs-non-ASCII rule is good enough; over-counting by ≤3 weight is
+  inside the safety margin.
+- Discord/Slack/iMessage limits. They're 2000+ chars; Twitter is the
+  binding constraint.
+- An aria-label "alt text" share variant for screen readers
+  ([Slate piece](https://slate.com/culture/2022/02/wordle-word-game-results-accessibility-twitter.html),
+  wa11y.co for Wordle). Real concern but separate commit.
+- Compaction-style re-encoding (one emoji per word). Loses the
+  steal/add signal that makes Anagrams' grid informative; rejected
+  above.
