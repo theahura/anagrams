@@ -1962,3 +1962,160 @@ block, ~10 tests asserting plaintext behavior:
 - [Lireo — Twitter alt text 1000-char limit](https://www.lireo.com/what-to-know-twitter-alternative-text-images/)
 - [BOIA — Emojis and web accessibility](https://www.boia.org/blog/emojis-and-web-accessibility-best-practices)
 - [CSUN — Dashes and hyphens accessibility](https://news.csun.edu/accessibility/accessibility-tip-on-dashes-and-hyphens/)
+
+## In-game missed-draw penalty feedback (v16 commit)
+
+Open follow-up from APPLICATION-SPEC.md — the spec calls out
+penalising "asking for new letters when existing anagrams exist on the
+board." The penalty is implemented (`scoring.js#hasLoosePoolAnagram`,
+`finalScore = wordPoints - 10·missedDrawCount`, applied to the
+live-score display in `GameScreen.vue#score`), but invisible
+*per-action* during gameplay — the player sees the live score drop by
+10 with no labelled cause and learns of `missedDrawCount` only on the
+score screen. This is a pedagogical gap: the penalty is meant to
+*teach* "look before drawing", but without per-draw attribution the
+player can't attribute the score drop to a missed opportunity.
+
+### Decision: warning message in the existing feedback live region
+
+After every `onDraw` in `GameScreen.vue`, compare
+`next.missedDrawCount > game.value.missedDrawCount`:
+- True → set `feedback.value = { type: 'warning', text: 'Penalty: a
+  word was available. −10 points.' }`
+- False → keep current behaviour (`feedback.value = null`)
+
+The existing `<div class="feedback" role="status" aria-atomic="true">`
+already exists and is unconditionally rendered (v6/v7 work). Reusing
+it keeps the live-region count to one and matches the established
+submit-feedback channel. Visual: new `.feedback.warning` CSS rule with
+the yellow palette already used by the accent ring (`#b59f3b` text on
+a tinted background, parallel to the `.success` and `.error` rules).
+
+### A11y choices (researched against industry sources)
+
+- **Keep `role="status"`, do NOT switch to `role="alert"`.** Alert is
+  hostile for a sub-optimal-play penalty — it interrupts whatever the
+  SR is currently reading, including mid-typing speech. Status is
+  polite. ([MDN: status role](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role),
+  [MDN: alert role](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/alert_role),
+  [Sara Soueidan on live regions](https://www.sarasoueidan.com/blog/accessible-notifications-with-aria-live-regions-part-1/))
+- **Lead with the textual word "Penalty:"**, not just yellow color.
+  WCAG 1.4.1 (Use of Color) forbids communicating severity by color
+  alone — the textual prefix carries the semantics for both
+  colour-blind and screen-reader users.
+- **Include the numeric `−10`.** Industry convention in scoring games
+  (Scrabble, Spelling Bee, Bookworm) is to surface point deltas;
+  qualitative-only ("you missed a word") leaves the player guessing
+  the magnitude. Use **Unicode minus `−` (U+2212)**, not hyphen-minus
+  `-`: SRs read U+2212 as "minus 10" reliably; hyphen-minus reads as
+  "dash 10" or is skipped entirely. ([jamescatt.ca on negative
+  numbers](https://jamescatt.ca/blog/2020/minus-the-minus-a-psa-about-screen-readers-and-negative-numbers/),
+  [Deque on punctuation](https://www.deque.com/blog/dont-screen-readers-read-whats-screen-part-1-punctuation-typographic-symbols/))
+- **No em-dash in the warning message.** Em-dash (U+2014) reads
+  unreliably across screen readers (silent on VoiceOver, "dash" on
+  JAWS, varies on NVDA). Use period or comma. The codebase elsewhere
+  (e.g. `reasonText('no-new-play')`) uses em-dashes, but those are
+  one-shot error messages on submit — a player typically only hears
+  one or two per game. The missed-draw warning fires up to ~20× per
+  game, so the SR-friendly form matters more.
+- **Contrast.** `#b59f3b` foreground on `#121213` background is
+  ~7.3:1 — passes WCAG AA for normal text and AAA for large text, per
+  [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/).
+  This is the same accent yellow already in use for `:focus-visible`
+  rings and `.home-calendar-cell.today` outline.
+
+### Phrasing choice
+
+Final: `Penalty: a word was available. −10 points.`
+
+Considered and rejected:
+- `−10: a word was available.` — leads with the negative number;
+  research notes the textual cause should anchor the message.
+- `You skipped a possible word.` — implies intentional skipping; the
+  player did not necessarily know.
+- `Penalty: −10 points (a word was available).` — parentheses read
+  poorly on SR.
+
+### Known limitation: rapid identical re-announcement
+
+If the player draws three times in a row and each is a missed draw,
+the live-region textContent stays `Penalty: a word was available.
+−10 points.` after the first set. SRs typically do **not**
+re-announce identical successive text on `aria-live="polite"`
+([Sara Soueidan, ibid.](https://www.sarasoueidan.com/blog/accessible-notifications-with-aria-live-regions-part-1/)).
+Visual users still see the yellow box, but SR users will hear the
+penalty announced only once per "run" of consecutive missed draws.
+
+Considered fixes deferred for v0:
+- **Clear-then-set via `nextTick`**: forces a textContent change but
+  adds async complexity; the in-DOM clear is invisible to sighted
+  users (they see the box stay yellow) and only mostly works on SRs.
+- **Interpolate the running missed-draw count** (`Penalty 2: ...`):
+  bloats the message and gives the player a running tally that may
+  feel punitive on top of the score deduction.
+- **Reset feedback to null briefly between identical penalties**: same
+  complexity for marginal benefit.
+
+The single-announcement limitation is acceptable for v0. Document it,
+revisit if real SR users report missing successive announcements.
+
+### What does NOT change
+
+- `src/scoring.js` — `hasLoosePoolAnagram`, `finalScore` unchanged.
+- `src/game.js` — `drawTile` signature unchanged; still returns the
+  bumped `missedDrawCount` directly. The component computes the diff
+  by subtracting `game.value.missedDrawCount` (pre) from
+  `next.missedDrawCount` (post). No `hadAnagram` flag exposed on the
+  return value (would expand the API for one consumer).
+- `src/components/ScoreScreen.vue` — already shows
+  `result.missedDrawCount` as a static cell on the score grid. No
+  change.
+- Storage schema — no shape change.
+- Existing live region (`role="status" aria-atomic="true"`) — reused
+  verbatim; no role/markup change.
+
+### Tests (TDD plan)
+
+`tests/gameScreenInteraction.test.js` — extend with a new
+`describe('GameScreen draw — missed-draw feedback', …)` block.
+Construction: a `dict`-aware `makeGame` helper that includes loose
+letters guaranteed to have an anagram via dictionary lookup (e.g.
+`['c','a','t']` → "cat" is in TWL06). Asserts on visible behaviour
+through the rendered DOM:
+
+1. **Missed draw produces warning feedback**. Mount with `loose:
+   ['c','a','t']` (all 3-letter perms include "cat"); click `Draw
+   tile`; assert `.feedback.warning` exists and its text contains
+   `Penalty` and `−10`.
+2. **Non-missed draw clears feedback**. Mount with `loose: ['x','y',
+   'z']` (no 3-letter dictionary anagram); ensure feedback is set to
+   something first (e.g. submit an invalid word) then click `Draw
+   tile`; assert `.feedback` is empty (`feedback-empty` class).
+3. **Warning class applied (not error / not success)**. Same as #1
+   but assert classList contains `warning` and not `error`/`success`.
+4. **Warning message uses Unicode minus, not hyphen-minus**. Assert
+   `text.includes('−')` and `!text.includes('-10')`.
+5. **No em-dash in warning text**. Assert `!text.includes('—')`.
+6. **Live region role preserved**. Assert the feedback element still
+   carries `role="status"` after a missed-draw warning is shown
+   (regression).
+7. **Submit success after a missed-draw clears the warning**. Mount
+   with `loose: ['c','a','t']`; click `Draw tile` (warning shown);
+   submit "cat" successfully; assert feedback type flips from
+   warning to success.
+
+Hand-tested at the design level only: testing actual SR
+re-announcement of identical strings is not feasible in happy-dom
+(per the same constraints documented in the v8 reduced-motion
+work). The visible behaviour is what we test.
+
+### Sources
+
+- [MDN: ARIA status role](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role)
+- [MDN: ARIA alert role](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/alert_role)
+- [MDN: ARIA live regions](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Guides/Live_regions)
+- [Sara Soueidan: Accessible notifications with live regions](https://www.sarasoueidan.com/blog/accessible-notifications-with-aria-live-regions-part-1/)
+- [WebAIM: Contrast Checker](https://webaim.org/resources/contrastchecker/)
+- [Deque: Screen readers and punctuation](https://www.deque.com/blog/dont-screen-readers-read-whats-screen-part-1-punctuation-typographic-symbols/)
+- [jamescatt.ca: Screen readers and negative numbers](https://jamescatt.ca/blog/2020/minus-the-minus-a-psa-about-screen-readers-and-negative-numbers/)
+- [NN/g: Usability heuristics applied to video games](https://www.nngroup.com/articles/usability-heuristics-applied-video-games/)

@@ -1355,6 +1355,99 @@ word) explicit. Truncation parity with the emoji form: `history.length
   gzipped for the new exported function plus two button
   handlers).
 
+### `feat/initial-game` — In-game missed-draw penalty feedback (this commit)
+
+Surfaces the existing `−10` missed-draw penalty as a real-time
+warning in the existing accessible feedback live region after every
+"Draw tile" click. The application spec calls out penalising "asking
+for new letters when existing anagrams exist on the board"; the
+penalty was implemented (`scoring.js#hasLoosePoolAnagram`,
+`finalScore = wordPoints − 10·missedDrawCount`) and the live score
+already reflected it (it drops by 10 on a missed draw), but the
+*cause* was hidden until the score screen — the player saw the
+score drop with no labelled attribution, defeating the penalty's
+pedagogical intent. After this commit, when `missedDrawCount` ticks
+up on a draw, the existing `<div class="feedback" role="status"
+aria-atomic="true">` shows `Penalty: a word was available. −10
+points.` in a yellow palette parallel to the existing success/error
+classes. Non-missed draws clear feedback (existing behaviour).
+
+#### What changed
+- `src/components/GameScreen.vue` — `onDraw()` now snapshots
+  `prevMissed = game.value.missedDrawCount` before calling
+  `drawTile`, then compares `next.missedDrawCount > prevMissed`. On
+  true: sets `feedback = { type: 'warning', text: 'Penalty: a word
+  was available. −10 points.' }`. On false: clears feedback (existing
+  behaviour). The diff is computed client-side — the `drawTile`
+  signature is intentionally unchanged.
+- `style.css` — new `.feedback.warning` rule using the project's
+  accent yellow (`#b59f3b` text on tinted background, parallel to
+  the existing `.feedback.success` and `.feedback.error` rules
+  byte-for-byte).
+- No domain-module changes (`src/scoring.js`, `src/game.js`,
+  `src/pool.js`, `src/anagramRules.js`, `src/staging.js`,
+  `src/share.js`, `src/storage.js`, `src/dictionary.js`,
+  `src/trivialInflection.js`, `src/dateKey.js`, `src/tiles.js`,
+  `src/prng.js` are untouched). No `ScoreScreen.vue` change. No new
+  dependencies. No storage shape change. No `SCHEMA_VERSION` bump.
+
+#### A11y choices (researched against industry sources)
+- **`role="status"` preserved.** Did not switch to `role="alert"` —
+  alert is hostile for sub-optimal-play feedback (interrupts SR
+  mid-typing). The penalty is informational, not safety-critical.
+- **Lead with textual `Penalty:` prefix.** Color-only severity
+  (yellow) violates WCAG 1.4.1 (Use of Color); the word `Penalty`
+  carries the semantic for color-blind and SR users.
+- **Unicode minus `−` (U+2212), NOT hyphen-minus `-` (U+002D).** SRs
+  read U+2212 as "minus 10" reliably; hyphen-minus reads as "dash 10"
+  or is skipped. Test #4 locks this invariant.
+- **No em-dash in the warning text.** Em-dash (U+2014) reads
+  unreliably across SRs (silent on VoiceOver, "dash" on JAWS). The
+  one-shot `reasonText('no-new-play')` error elsewhere in
+  `GameScreen.vue` still uses an em-dash because it is not
+  recurring; the missed-draw warning fires up to ~20× per game. Test
+  #5 locks this invariant.
+- **Contrast.** `#b59f3b` on `#121213` is ~7.3:1 (AA normal text,
+  AAA large text), per WebAIM Contrast Checker.
+
+#### Tests added
+- `tests/gameScreenInteraction.test.js` — new
+  `describe('GameScreen draw — missed-draw feedback', …)` block, 6
+  tests asserting visible behaviour through the rendered DOM:
+  - "shows a warning message after a draw when the loose pool had a
+    possible word" (mount with `loose: ['c','a','t']` → `cat` is in
+    TWL06; click Draw; assert `.feedback.warning`, text contains
+    `Penalty` and `−10`).
+  - "clears feedback after a draw when the loose pool had no
+    possible word" (mount with `loose: ['x','y','z']`; pre-set
+    feedback via invalid submit; click Draw; assert
+    `feedback-empty`).
+  - "warning class is mutually exclusive with success and error".
+  - "uses the Unicode minus sign (U+2212), not the hyphen-minus
+    (U+002D)".
+  - "does not contain an em-dash (U+2014) in the warning text".
+  - "flips warning to success when a valid word is submitted after
+    the missed draw" (locks integration with the existing submit
+    feedback flow).
+
+#### Known limitation (documented in RESEARCH-NOTES.md)
+- Screen readers typically don't re-announce identical text on
+  `aria-live="polite"`. Consecutive identical "Penalty: a word was
+  available. −10 points." messages will only be announced once per
+  run of consecutive missed draws. Visual users still see the
+  yellow box on every draw. Considered fixes (clear-then-set via
+  `nextTick`, count interpolation, brief reset to null) deferred —
+  add complexity for marginal benefit; revisit if real SR users
+  report missing announcements.
+
+#### Verified
+- `npm test` — 242/242 passing (was 236; +6 new).
+- `npm run build` — production bundle builds cleanly in 0.68 s.
+  CSS now 9.34 kB (was 9.26 kB; +0.08 kB for the
+  `.feedback.warning` rule); JS at 106.27 kB raw / 40.61 kB
+  gzipped (was 106.14 kB / 40.56 kB; +0.13 kB raw for the
+  conditional warning assignment).
+
 ## Open follow-ups (next commits)
 
 - Score-tier color heatmap on calendar cells (currently boolean
@@ -1364,7 +1457,9 @@ word) explicit. Truncation parity with the emoji form: `history.length
 - A11y polish round 2: keyboard activation tests in a real browser
   (Playwright) instead of happy-dom; live-region announcements verified
   against an actual screen reader; reduce score-region announcement
-  cadence if play-tester feedback says it's chatty.
+  cadence if play-tester feedback says it's chatty. Missed-draw
+  warning re-announcement on consecutive identical penalties (clear-
+  then-set via nextTick) deferred — visual indicator suffices for v0.
 - Mobile composition-input support for the trail-based input model
   (Android Chrome / GBoard `insertCompositionText` currently demotes
   the trail to all-typed entries, losing identity).

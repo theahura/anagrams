@@ -486,3 +486,93 @@ describe('GameScreen sticky-claim trail', () => {
     expect(tiles()[0].classes()).toContain('used');
   });
 });
+
+describe('GameScreen draw — missed-draw feedback', () => {
+  it('shows a warning message after a draw when the loose pool had a possible word', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.classes()).toContain('warning');
+    expect(feedback.text()).toContain('Penalty');
+    expect(feedback.text()).toContain('−10');
+  });
+
+  it('clears feedback after a draw when the loose pool had no possible word', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['x', 'y', 'z'] }), dict },
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('xyz');
+    await wrapper.find('form.word-input').trigger('submit.prevent');
+    expect(wrapper.find('.feedback').text()).not.toBe('');
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.classes()).toContain('feedback-empty');
+    expect(feedback.text()).toBe('');
+  });
+
+  it('warning class is mutually exclusive with success and error', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.classes()).toContain('warning');
+    expect(feedback.classes()).not.toContain('success');
+    expect(feedback.classes()).not.toContain('error');
+  });
+
+  it('uses the Unicode minus sign (U+2212), not the hyphen-minus (U+002D)', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+
+    const text = wrapper.find('.feedback').text();
+    expect(text).toContain('−');
+    expect(text).not.toContain('-10');
+  });
+
+  it('does not contain an em-dash (U+2014) in the warning text', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+
+    expect(wrapper.find('.feedback').text()).not.toContain('—');
+  });
+
+  it('flips warning to success when a valid word is submitted after the missed draw', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+    expect(wrapper.find('.feedback').classes()).toContain('warning');
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('cat');
+    await wrapper.find('form.word-input').trigger('submit.prevent');
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.classes()).toContain('success');
+    expect(feedback.classes()).not.toContain('warning');
+  });
+});

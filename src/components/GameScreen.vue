@@ -167,9 +167,17 @@ function onSubmit() {
 }
 
 function onDraw() {
+  const prevMissed = game.value.missedDrawCount;
   const next = drawTile(game.value, props.dict);
   game.value = next;
-  feedback.value = null;
+  if (next.missedDrawCount > prevMissed) {
+    feedback.value = {
+      type: 'warning',
+      text: 'Penalty: a word was available. −10 points.',
+    };
+  } else {
+    feedback.value = null;
+  }
   if (next.ended) {
     finishGame();
   }

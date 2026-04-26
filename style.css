@@ -328,6 +328,12 @@ button.word-row {
   border: 1px solid #e74c3c;
 }
 
+.feedback.warning {
+  background: rgba(181, 159, 59, 0.15);
+  color: #b59f3b;
+  border: 1px solid #b59f3b;
+}
+
 /* === Home === */
 .home {
   text-align: center;
