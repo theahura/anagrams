@@ -1418,3 +1418,180 @@ games reset at the user's local midnight by reading the device clock.
   parsing. They're consuming opaque YYYY-MM-DD labels and producing
   human-readable strings; the UTC-parse trick produces the right
   weekday in all timezones.
+
+## Sticky-claim trail / staged-tile model (v13 commit)
+
+Open follow-up from CURRENT-PROGRESS.md "Sticky-claim or staged-array
+model so click-to-remove on duplicate leftmost letters un-highlights
+the clicked tile (not the rightmost)." This was deferred as
+out-of-scope on the v4 click-to-remove commit and is now the highest-
+impact open item.
+
+### The bug
+
+Today the rack might offer `R, R, T, S` (loose tiles indices 0..3).
+Player clicks tile 0 (the first R), then types `at`. Highlight-set
+recompute in `staging.js#partialHighlight` walks the typed multiset
+greedily and claims the leftmost-of-letter loose tile per letter — so
+tile 0 is highlighted as "claimed." Player clicks tile 0 to deselect.
+`removeFirstOccurrence` removes one R from `typed`, leaving `at`.
+Recompute again picks leftmost-of-letter — but typed is `at`, no R, so
+no R is highlighted. **Visually correct in this two-R rack.** Now
+suppose only tile 0's R was claimed and tile 1's R is unclaimed:
+player clicks tile 0; we remove the leftmost matching letter from
+typed, leaving `at`; nothing else changed — also fine. The bug
+**actually surfaces** in scenarios where typed contains multiple R's
+already (e.g. `rar` from a click-tile-1, click-tile-0, type-a,
+type-r run): recompute keeps highlighting leftmost-first, so the
+*post-click* highlight set is `{tile-0, tile-1}` even though we just
+clicked tile 0 to deselect. Effectively, the model never had a way to
+remember **which specific tile the user clicked** — it only remembers
+**how many of each letter are claimed**.
+
+Symmetric issue on word rows is benign: `consumption.words` is index-
+based and the click handler removes the word's letters wholesale, so
+word-row clicks already track identity.
+
+### The fix: a "claim trail" alongside typed
+
+`trail = ref([])` — array of entries, one per letter currently in the
+input box, in left-to-right order:
+
+```
+{ kind: 'loose', sourceIndex: number, letter: 'r' }
+{ kind: 'word',  sourceIndex: number, letter: 'r' }   // multiple per word click
+{ kind: 'typed', letter: 'r' }                        // no source
+```
+
+`typed` becomes a `computed(() => trail.value.map(e => e.letter).join(''))`.
+
+**Click handlers** push entries with their identity. Click on already-
+claimed tile finds the matching `{kind:'loose', sourceIndex:i}` entry
+and splices it out — so the clicked tile, not the leftmost-matching
+one, is the one that gets un-claimed. Word click on already-claimed
+word finds all entries with `{kind:'word', sourceIndex:i}` and splices
+all of them out atomically.
+
+**Direct typing** is intercepted via `@beforeinput`. Input event types
+(`event.inputType`):
+- `insertText` (single letter) → push `{kind:'typed', letter}`. PreventDefault
+  so the trail-derived computed value is the canonical input value.
+- `deleteContentBackward` → pop the last trail entry.
+- `deleteContentForward` → splice based on `selectionStart`.
+- `insertFromPaste` → pushed as N `kind:'typed'` entries.
+- Selection-delete (cut, range delete) → splice the slice
+  `[selectionStart, selectionEnd)`.
+- Anything unrecognized (IME composition, etc.) → preventDefault, no-op.
+
+This game is English-letters-only and desktop-first; IME composition
+is a non-goal, so a strict `preventDefault()` allow-list is safe.
+
+**Highlight set** (`consumption`) becomes a pure derivation from
+`trail`: a loose tile index `i` is in `consumption.loose` iff some
+entry has `kind:'loose' && sourceIndex===i`; a word index `i` is in
+`consumption.words` iff some entry has `kind:'word' && sourceIndex===i`.
+No greedy multiset matching anymore — identity is preserved.
+
+### Why this design (over alternatives)
+
+- **`v-model` + watch(typed)**: rejected. The watcher fires post-flush
+  with stale state; diffing old vs new typed string to figure out
+  what changed (insert? delete? paste?) is fragile; re-entrancy bugs
+  are likely. (Researcher cite: [Vue Watchers docs](https://vuejs.org/guide/essentials/watchers).)
+- **Per-letter typed entries always**: rejected. Loses identity on
+  click — defeats the purpose.
+- **Bind `:value` + `@beforeinput`**: chosen. Trail is the model;
+  the input is a transient editor. Mirrors Downshift `useMultipleSelection`,
+  shadcn-vue `TagsInput`, PrimeVue `Chips`. Synchronous mutation
+  inside the handler keeps Vue's reactivity flow happy.
+- **Trail-as-set vs trail-as-array**: array. Order matters for
+  display position and for backspace-removes-last semantics.
+
+### Edge cases / gotchas
+
+- **`insertCompositionText` on Android Chrome / GBoard**: the research
+  agent flagged this. We `preventDefault` on unrecognized inputTypes
+  and don't update trail — so on a phone with composition input,
+  typing might not work. Mobile play is documented as out of scope
+  for v13; if it becomes a gate, fall back to v-model + diff for
+  composition events. (Researcher cite:
+  [MDN beforeinput](https://developer.mozilla.org/en-US/docs/Web/API/Element/beforeinput_event).)
+- **Reconciliation safety net**: if the trail-derived `typed.value`
+  ever diverges from the actual `<input>.value` (e.g. browser auto-
+  fill, third-party extension), the computed binding pulls the input
+  back into sync on the next render. We don't try to be cleverer
+  than that.
+- **Submit-time identity**: `submitWord` only needs the typed string
+  (and the pool). Trail is purely for highlight identity and click-
+  removal. After a successful submit, both `trail` and `typed` reset
+  to empty.
+- **Stale `sourceIndex` after submit**: when `submitWord` succeeds the
+  pool's loose-letter array is rebuilt (consumed letters removed,
+  others re-indexed). Trail must be cleared on submit success — its
+  source-indices reference a pool snapshot that no longer exists.
+  Handled by the existing `typed.value = ''` reset; in the new model
+  this becomes `trail.value = []`.
+- **Stale `sourceIndex` after draw**: a draw appends one new tile
+  to `looseLetters`. Existing indices are unchanged, so a trail
+  entry with `sourceIndex=2` still refers to the same tile. Trail
+  does NOT need to clear on draw.
+- **Highlight on partial coverage**: if typed = "rat" and the rack
+  has only one R, the existing `partialHighlight` highlights the
+  one R it can claim. In the new model, if the user typed (no
+  click) the trail entries are all `kind:'typed'` with no
+  sourceIndex — so no loose tile is "claimed" by sourceIndex.
+  We need a fallback: when computing `consumption`, after collecting
+  identity-bound claims from the trail, run the existing greedy
+  multiset matcher on the `kind:'typed'` letters against the
+  remaining (unclaimed-by-identity) tiles to keep partial-cover
+  hints. This is a hybrid model: identity wins where it exists,
+  greedy fills the rest. **Critical** — without it, a player who
+  types `cat` with no clicks sees zero loose-tile highlights, a UX
+  regression.
+
+### Tests
+
+- **`tests/staging.test.js`**: 11 existing tests stay passing. The
+  `highlightConsumption` API may need to gain a second param (the
+  trail) or a new `highlightFromTrail` sibling export. Add unit
+  tests:
+  - "click identity persists when trail entry has sourceIndex"
+  - "trail-with-only-typed-entries falls back to greedy match
+    (parity with old behavior)"
+  - "trail with mixed identity + typed entries highlights the
+    identity-bound tile and greedy-matches the typed residue"
+- **`tests/gameScreenInteraction.test.js`**: existing 14+9 tests
+  retargeted minimally. Add the headline regression test:
+  - "clicking the leftmost-of-duplicate-claimed tile un-highlights
+    *that* tile, not the rightmost" (rack `[R,R,T,S]`, click tile 0,
+    click tile 1, click tile 0 → consumption.loose === {1}).
+  - "Backspace pops the last trail entry, regardless of whether it's
+    a click or a typed letter."
+  - "typing then clicking integrates correctly: type 'r', click
+    tile 1 (R), type 'a' → consumption.loose includes tile 1 and
+    one of the leftmost R's via greedy fallback for the 'r' typed."
+  - "submit clears both typed and trail; consumption is empty after."
+
+### Out of scope
+
+- Mobile composition-input support. Manual testing on real Android
+  is the gate; not a unit-test concern.
+- Per-letter click-to-remove inside a placed word row. Word entries
+  remain atomic (all-or-nothing).
+- Backspace-removes-just-the-typed-tail-only (without affecting
+  click entries). The simplest spec is "Backspace pops trail tail";
+  if the tail is a click entry, that click is undone. Matches user
+  intuition.
+- Sticky highlights for word rows (already correct via index-based
+  click handler).
+
+### Decision summary
+
+Replace `v-model="typed"` with `:value="typed"` + `@beforeinput` /
+`@input` handlers. Introduce `trail` ref. Make `typed` a computed
+joining trail letters. Click handlers push/splice trail entries by
+sourceIndex. `consumption` is identity-derived from trail with a
+greedy-fallback for `kind:'typed'` residue. `submitWord` keeps its
+existing string-based contract (no signature change). All other
+modules (`anagramRules`, `game`, `pool`, `scoring`, `share`,
+`storage`) are untouched.

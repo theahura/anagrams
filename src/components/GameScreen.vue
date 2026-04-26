@@ -11,11 +11,33 @@ const props = defineProps({
 const emit = defineEmits(['end']);
 
 const game = ref(props.initialGame);
-const typed = ref('');
+const trail = ref([]);
 const feedback = ref(null);
 const elapsedMs = ref(0);
 const inputRef = ref(null);
 let timerHandle = null;
+
+const typed = computed({
+  get: () => trail.value.map((e) => e.letter).join(''),
+  set: (v) => {
+    const next = String(v ?? '');
+    const prev = trail.value.map((e) => e.letter).join('');
+    if (next === prev) return;
+    if (next.length > prev.length && next.startsWith(prev)) {
+      const added = next.slice(prev.length);
+      const out = [...trail.value];
+      for (const ch of added) out.push({ kind: 'typed', letter: ch });
+      trail.value = out;
+      return;
+    }
+    if (next.length < prev.length && prev.startsWith(next)) {
+      const removed = prev.length - next.length;
+      trail.value = trail.value.slice(0, trail.value.length - removed);
+      return;
+    }
+    trail.value = next.split('').map((ch) => ({ kind: 'typed', letter: ch }));
+  },
+});
 
 function refocusInput() {
   inputRef.value?.focus();
@@ -44,45 +66,72 @@ const faceDownCount = computed(() => game.value.pool.faceDown.length);
 const canDraw = computed(() => faceDownCount.value > 0);
 
 const consumption = computed(() =>
-  highlightConsumption(typed.value, game.value.pool)
+  highlightConsumption(typed.value, game.value.pool, trail.value)
 );
 
-function removeFirstOccurrence(s, ch) {
-  const target = ch.toLowerCase();
-  const lower = s.toLowerCase();
-  const idx = lower.indexOf(target);
-  if (idx === -1) return s;
-  return s.slice(0, idx) + s.slice(idx + 1);
+function findIdentityIndex(predicate) {
+  for (let i = 0; i < trail.value.length; i++) {
+    if (predicate(trail.value[i])) return i;
+  }
+  return -1;
 }
 
-function removeWordLetters(s, word) {
-  let out = s;
-  for (const ch of word) out = removeFirstOccurrence(out, ch);
-  return out;
+function spliceTrail(indices) {
+  const drop = new Set(indices);
+  trail.value = trail.value.filter((_, idx) => !drop.has(idx));
+}
+
+function removeFirstTypedLetter(letter) {
+  const target = letter.toLowerCase();
+  const idx = findIdentityIndex(
+    (e) => e.kind === 'typed' && e.letter.toLowerCase() === target
+  );
+  if (idx === -1) return false;
+  spliceTrail([idx]);
+  return true;
 }
 
 function onTileClick(i) {
-  if (consumption.value.loose.has(i)) {
-    typed.value = removeFirstOccurrence(typed.value, looseLetters.value[i]);
+  const idIdx = findIdentityIndex(
+    (e) => e.kind === 'loose' && e.sourceIndex === i
+  );
+  if (idIdx !== -1) {
+    spliceTrail([idIdx]);
+  } else if (consumption.value.loose.has(i)) {
+    removeFirstTypedLetter(looseLetters.value[i]);
   } else {
-    typed.value += looseLetters.value[i];
+    trail.value = [
+      ...trail.value,
+      { kind: 'loose', sourceIndex: i, letter: looseLetters.value[i] },
+    ];
   }
   clearFeedback();
   refocusInput();
 }
 
 function onWordClick(i) {
-  if (consumption.value.words.has(i)) {
-    typed.value = removeWordLetters(typed.value, playerWords.value[i].word);
+  const idIndices = [];
+  for (let k = 0; k < trail.value.length; k++) {
+    if (trail.value[k].kind === 'word' && trail.value[k].sourceIndex === i) {
+      idIndices.push(k);
+    }
+  }
+  if (idIndices.length > 0) {
+    spliceTrail(idIndices);
+  } else if (consumption.value.words.has(i)) {
+    for (const ch of playerWords.value[i].word) removeFirstTypedLetter(ch);
   } else {
-    typed.value += playerWords.value[i].word;
+    const additions = playerWords.value[i].word
+      .split('')
+      .map((ch) => ({ kind: 'word', sourceIndex: i, letter: ch }));
+    trail.value = [...trail.value, ...additions];
   }
   clearFeedback();
   refocusInput();
 }
 
 function onClear() {
-  typed.value = '';
+  trail.value = [];
   clearFeedback();
   refocusInput();
 }
@@ -111,7 +160,7 @@ function onSubmit() {
   if (result.ok) {
     game.value = result.game;
     feedback.value = { type: 'success', text: `Played "${word}"` };
-    typed.value = '';
+    trail.value = [];
   } else {
     feedback.value = { type: 'error', text: reasonText(result.reason) };
   }

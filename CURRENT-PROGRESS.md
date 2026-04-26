@@ -981,10 +981,109 @@ saw the new puzzle at 5 PM the prior local day).
   it because verifying it requires reaching into component internals
   for marginal value.
 
+### `feat/initial-game` — Sticky-claim trail (this commit)
+
+Closes the v4 known-limitation note "with duplicate letters, clicking
+the leftmost-of-letter claimed tile causes the rightmost-of-letter to
+lose its highlight instead." Replaces the typed-string-as-source-of-
+truth + greedy-multiset highlight model with an identity-bound
+**claim trail**: clicks record *which specific tile* was clicked, so
+click-to-remove un-highlights that tile, not the leftmost-of-letter
+match. Independently confirmed industry-pattern parity with chip /
+multi-token inputs (Downshift `useMultipleSelection`, shadcn-vue
+`TagsInput`, PrimeVue `Chips`) — array of identity-bearing entries is
+the model; the text input is a transient editor for the next entry.
+
+#### What changed
+- `src/staging.js` — `highlightConsumption(typed, pool, trail?)`
+  gains an optional 3rd parameter. When `trail` is undefined or
+  contains no identity entries (only `kind:'typed'` or empty), the
+  function falls through to the legacy `findConsumption` +
+  `partialHighlight` path — pre-existing 2-arg call sites unchanged.
+  When `trail` contains any identity entry (`kind:'loose'` or
+  `kind:'word'` with a valid `sourceIndex`), those indices pre-claim
+  the highlight set and a residual greedy pass over the
+  `kind:'typed'` letters fills in unclaimed tiles/words. Identity-
+  claimed tiles are excluded from the greedy pass (so a typed `r`
+  after clicking tile 0 (R) picks tile 1, not tile 0 again). Stale
+  `sourceIndex` values are silently ignored via bounds-check.
+- `src/components/GameScreen.vue` — replaces `const typed = ref('')`
+  with `const trail = ref([])` plus a writable `computed({get, set})`
+  named `typed`. Getter joins trail letters into the v-model'd input
+  value. Setter diffs old/new strings: append-suffix pushes
+  `kind:'typed'` entries; backspace-prefix pops trail tail; any
+  other divergence (paste, mid-edit, `setValue` from tests) **demotes**
+  the trail to a flat array of `kind:'typed'` entries.
+  - `onTileClick(i)`: identity entry exists → splice it (sticky-
+    identity removal); else greedy claim → splice first `kind:'typed'`
+    entry whose letter matches; else push new identity entry.
+  - `onWordClick(i)`: any `{kind:'word', sourceIndex:i}` entries →
+    splice them all atomically; else greedy claim → strip word's
+    letters from typed entries; else push N identity entries.
+  - `onClear()` and submit-success path reset `trail.value = []`
+    directly (skipping the setter, which would demote rather than
+    cleanly clear). Submit success clears trail because consumed
+    loose tiles shift `looseLetters` indices, invalidating
+    `sourceIndex` values; draws append to `looseLetters`, leaving
+    indices stable, so trail survives across draws.
+- No domain-module changes (`anagramRules`, `game`, `pool`,
+  `scoring`, `share`, `storage`, `dictionary`, `trivialInflection`,
+  `multiset`, `prng`, `tiles`, `dateKey` are untouched).
+- No CSS changes. No new dependencies.
+
+#### Tests added
+- `tests/staging.test.js` — 7 new tests under `highlightConsumption
+  with claim trail`: identity over leftmost-first, two-tile identity,
+  greedy fallback for typed-only entries (parity with old behavior),
+  mixed identity + typed, identity excluded from greedy fallback,
+  identity word claim over greedy, all-typed word fallback.
+- `tests/gameScreenInteraction.test.js` — 6 new tests under
+  `GameScreen sticky-claim trail`: headline regression (rack
+  `[R,R,T,S]`, click 0, click 1, click 0 → tile 0 unclaimed, tile 1
+  claimed); preserves identity across an unrelated typed letter;
+  Clear empties trail and highlight; submit-success resets identity;
+  invalid submit preserves identity; word-row second click preserves
+  separately-clicked tile's identity.
+
+#### Documentation
+- `src/docs.md` — Core Implementation gains a "Staging / highlight
+  model" bullet documenting the trail entry shape table, the
+  fall-through-to-legacy contract, the hybrid identity-pre-claim +
+  greedy-residue path, and the bounds-check / silent-ignore
+  semantics. Things-to-Know gains entries on the 2-arg back-compat
+  guarantee and on why trail identity exists (the duplicate-letter
+  leftmost-claim regression).
+- `src/components/docs.md` — Core Implementation gains
+  "GameScreen — staging-trail model" and "GameScreen — click handler
+  decision tree" bullets. Things-to-Know replaces the old
+  "typed input is source of truth" entry with five new entries:
+  trail-as-source-of-truth, keyboard-vs-click unified through trail,
+  click-to-remove preserves clicked-tile identity (with
+  CURRENT-PROGRESS.md cross-link), trail-clears-on-submit-not-draw
+  (with `sourceIndex`-validity rationale), and demote-on-divergence
+  safety net.
+- `RESEARCH-NOTES.md` — appended a "Sticky-claim trail / staged-tile
+  model (v13 commit)" section with the bug analysis, design
+  decisions, edge cases (Android Chrome composition input,
+  reconciliation safety net), test plan, and out-of-scope list.
+
+#### Verified
+- `npm test` — 192/192 passing (was 179; +13 new tests).
+- `npm run build` — production bundle builds cleanly in 0.6 s. CSS
+  unchanged at 9.26 kB. JS at 103.64 kB raw / 39.89 kB gzipped (was
+  101.79 kB / 39.24 kB; +1.85 kB raw for the trail logic + writable
+  computed).
+
+#### Known limitation
+- Mobile / IME composition input is not supported through the new
+  setter path. The setter only handles append-suffix /
+  backspace-prefix / divergent diffs. `insertCompositionText` events
+  on Android Chrome / GBoard arrive as full-string replacements,
+  which trigger demote — losing identity. The game is desktop-first
+  and English-only; mobile composition support is deferred.
+
 ## Open follow-ups (next commits)
 
-- Sticky-claim or staged-array model so click-to-remove on duplicate
-  leftmost letters un-highlights the clicked tile (not the rightmost).
 - Truncate share grid for very long runs (Twitter 280-char limit) — not
   hit by typical games but possible.
 - Score-tier color heatmap on calendar cells (currently boolean
@@ -995,3 +1094,6 @@ saw the new puzzle at 5 PM the prior local day).
   (Playwright) instead of happy-dom; live-region announcements verified
   against an actual screen reader; reduce score-region announcement
   cadence if play-tester feedback says it's chatty.
+- Mobile composition-input support for the trail-based input model
+  (Android Chrome / GBoard `insertCompositionText` currently demotes
+  the trail to all-typed entries, losing identity).

@@ -334,3 +334,155 @@ describe('GameScreen accessibility', () => {
     wrapper.unmount();
   });
 });
+
+describe('GameScreen sticky-claim trail', () => {
+  it('un-highlights the clicked tile (not the leftmost) when duplicate-letter tiles are both claimed', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['r', 'r', 't', 's'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[0].trigger('click');
+    await tiles()[1].trigger('click');
+
+    expect(tiles()[0].classes()).toContain('used');
+    expect(tiles()[1].classes()).toContain('used');
+
+    await tiles()[0].trigger('click');
+
+    expect(tiles()[0].classes()).not.toContain('used');
+    expect(tiles()[1].classes()).toContain('used');
+    expect(wrapper.find('input.text-input').element.value).toBe('r');
+  });
+
+  it('preserves identity claim across an unrelated typed letter', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['r', 'r', 'a', 't'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[1].trigger('click');
+    expect(tiles()[1].classes()).toContain('used');
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('ra');
+
+    expect(tiles()[1].classes()).toContain('used');
+  });
+
+  it('clearing empties typed input and removes all highlight', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['r', 'a', 't'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[0].trigger('click');
+    const input = wrapper.find('input.text-input');
+    await input.setValue('rat');
+
+    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
+    await clearBtn.trigger('click');
+
+    expect(input.element.value).toBe('');
+    for (const t of tiles()) expect(t.classes()).not.toContain('used');
+  });
+
+  it('a successful submit clears typed input AND clears any identity claims', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't', 's'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[0].trigger('click');
+    await tiles()[1].trigger('click');
+    await tiles()[2].trigger('click');
+    expect(wrapper.find('input.text-input').element.value).toBe('cat');
+
+    await wrapper.find('form.word-input').trigger('submit.prevent');
+
+    expect(wrapper.find('input.text-input').element.value).toBe('');
+    for (const t of wrapper.findAll('.tile-rack .tile')) {
+      expect(t.classes()).not.toContain('used');
+    }
+  });
+
+  it('an invalid submit leaves typed and identity claims intact', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['x', 'q', 'z'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[0].trigger('click');
+    await tiles()[1].trigger('click');
+    await tiles()[2].trigger('click');
+    expect(tiles()[0].classes()).toContain('used');
+
+    await wrapper.find('form.word-input').trigger('submit.prevent');
+
+    expect(wrapper.find('input.text-input').element.value).toBe('xqz');
+    expect(tiles()[0].classes()).toContain('used');
+    expect(tiles()[1].classes()).toContain('used');
+    expect(tiles()[2].classes()).toContain('used');
+  });
+
+  it('backspacing one character preserves earlier identity claims and removes only the most recent', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['r', 'r', 't'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[0].trigger('click');
+    await tiles()[1].trigger('click');
+    expect(tiles()[0].classes()).toContain('used');
+    expect(tiles()[1].classes()).toContain('used');
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('r');
+
+    expect(tiles()[0].classes()).toContain('used');
+    expect(tiles()[1].classes()).not.toContain('used');
+  });
+
+  it('mid-string deletion via setValue demotes identity claims to typed (documenting the safety-net behaviour)', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't', 's'] }), dict },
+    });
+
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+    await tiles()[0].trigger('click');
+    await tiles()[1].trigger('click');
+    await tiles()[2].trigger('click');
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('ct');
+
+    expect(input.element.value).toBe('ct');
+    expect(tiles()[0].classes()).toContain('used');
+    expect(tiles()[1].classes()).not.toContain('used');
+    expect(tiles()[2].classes()).toContain('used');
+  });
+
+  it('clicking a word row a second time un-highlights it but keeps a separately-clicked tile claim', async () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: ['b'], words: ['rook'] }),
+        dict,
+      },
+    });
+
+    const wordRows = () => wrapper.findAll('.word-row');
+    const tiles = () => wrapper.findAll('.tile-rack .tile');
+
+    await wordRows()[0].trigger('click');
+    await tiles()[0].trigger('click');
+    expect(wrapper.find('input.text-input').element.value).toBe('rookb');
+    expect(wordRows()[0].classes()).toContain('consumed');
+    expect(tiles()[0].classes()).toContain('used');
+
+    await wordRows()[0].trigger('click');
+
+    expect(wrapper.find('input.text-input').element.value).toBe('b');
+    expect(wordRows()[0].classes()).not.toContain('consumed');
+    expect(tiles()[0].classes()).toContain('used');
+  });
+});
