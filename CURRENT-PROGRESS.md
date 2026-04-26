@@ -1448,6 +1448,94 @@ classes. Non-missed draws clear feedback (existing behaviour).
   gzipped (was 106.14 kB / 40.56 kB; +0.13 kB raw for the
   conditional warning assignment).
 
+### `feat/initial-game` — Allow play after the final draw (this commit)
+
+Closes a v1-era simplification that contradicted the canonical Snatch /
+Anagrams rule. Previously, `drawTile` ended the game immediately when
+the player drew the LAST face-down tile — the just-revealed letter was
+never playable. After this commit, the player can keep forming words
+from the freshly-revealed loose pool and ends the run manually via the
+existing "End game" button.
+
+#### Why
+Wikipedia's Anagrams article ("the game ends when all tiles are face
+up *AND* no further words can be formed") and the Bananagrammer Snatch
+write-up ("when all the tiles have been turned over, play continues
+until everyone decides that there are no more moves to make and quits")
+both say bag-empty is necessary but not sufficient. In Bananagrams, the
+last drawn letter is always usable; in solo word games (Spelling Bee,
+Wordscapes, Bookworm) ends are level-completion / time-box / explicit
+quit, never a yanked-rug auto-end on a depleted resource. Full citations
+in RESEARCH-NOTES.md "Allow play after the final draw (v17 commit)".
+
+#### What changed
+- `src/game.js` — `drawTile`: `ended: isFaceDownEmpty(next)` → `ended:
+  false`. The defensive `next === null` (poolDraw on empty pool) branch
+  still returns `ended: true` for safety; that path is unreachable
+  through normal play because `GameScreen`'s Draw button is gated by
+  `:disabled="!canDraw"` (`canDraw = faceDownCount > 0`). Removed the
+  now-dead `import { isFaceDownEmpty }` from `pool.js`.
+
+#### What did NOT change
+- No `.vue` template / CSS changes — `:disabled="!canDraw"` already
+  blocks redundant draws once face-down empties; the existing "End
+  game" button already routes to `finishGame`.
+- No persistence / dictionary / lemma / share / scoring changes.
+- No new dependencies. No `SCHEMA_VERSION` bump (no persisted shape
+  change).
+- `pool.js#isFaceDownEmpty` is still exported — it's no longer
+  imported by `game.js`, but it's still public API and used elsewhere
+  in tests; no need to delete.
+
+#### Tests added
+- `tests/game.test.js` — 2 new tests under `describe('drawTile', …)`:
+  - `does not end the game when drawing the last face-down tile`
+    (headline regression: seed `faceDown: ['z']`, `looseLetters:
+    ['x','q','j']`; assert `next.ended === false`,
+    `next.pool.faceDown` is empty, `next.pool.looseLetters` contains
+    `'z'`).
+  - `applies the missed-draw penalty when drawing the last face-down
+    tile` (locks the orthogonal penalty path against accidental
+    regressions: seed `faceDown: ['z']`, `looseLetters: ['c','a','t']`;
+    assert `next.missedDrawCount === 1`).
+- `tests/gameScreenInteraction.test.js` — 1 new test under a new
+  `describe('GameScreen draw button gating', …)` block:
+  - `disables the Draw button when the face-down pool is empty`
+    (locks the load-bearing invariant that `canDraw =
+    faceDownCount > 0` keeps the user from drawing past an empty bag,
+    which is what makes the defensive `next === null` branch in
+    `drawTile` unreachable through normal play). The enabled-when-
+    tiles-remain mirror is implicit in every other test that clicks
+    Draw under the default `makeGame` (`faceDown: ['x','y','z']`).
+- The pre-existing `marks game as ended when face-down was empty`
+  test (defensive `next === null` path, seeded `faceDown: []`) is
+  unchanged and still passing.
+
+#### Documentation
+- `src/docs.md` — Game-lifecycle bullet rewritten to describe the new
+  manual-end behaviour with the defensive-branch caveat and a cross-
+  link to `GameScreen.vue#onEndGame`. New Things-to-Know entry:
+  "Bag-empty is necessary but not sufficient to end the game" with
+  the canonical-Snatch citations and a cross-link to the v17
+  RESEARCH-NOTES section. Notes that the missed-draw penalty path
+  still fires on every draw including the last.
+- `src/components/docs.md` — GameScreen bullet updated: `end` is
+  emitted on the explicit "End game" click (`onEndGame` →
+  `finishGame`), not on bag-exhaustion. `onDraw` still inspects
+  `next.ended` defensively but the branch is unreachable through
+  normal play.
+- `RESEARCH-NOTES.md` — appended a "Allow play after the final draw
+  (v17 commit)" section with sources, decision, tests, and out-of-
+  scope items.
+
+#### Verified
+- `npm test` — 245/245 passing (was 242; +3 new: 2 game + 1
+  gameScreenInteraction).
+- `npm run build` — production bundle builds cleanly in 0.6 s. JS at
+  106.22 kB raw / 40.60 kB gzipped (was 106.27 kB / 40.61 kB; −0.05
+  kB raw / −0.01 kB gzipped from removing the `isFaceDownEmpty`
+  import call site). CSS unchanged at 9.34 kB.
+
 ## Open follow-ups (next commits)
 
 - Score-tier color heatmap on calendar cells (currently boolean

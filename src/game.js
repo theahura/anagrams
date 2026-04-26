@@ -1,6 +1,6 @@
 import { createTileSet, shuffleTiles } from './tiles.js';
 import { getDailyRng, getRandomRng } from './prng.js';
-import { createPool, drawTile as poolDraw, formWord, isFaceDownEmpty } from './pool.js';
+import { createPool, drawTile as poolDraw, formWord } from './pool.js';
 import { canFormWord } from './anagramRules.js';
 import { hasLoosePoolAnagram, finalScore } from './scoring.js';
 
@@ -34,7 +34,7 @@ export function drawTile(game, dict) {
     ...game,
     pool: next,
     missedDrawCount: game.missedDrawCount + (hadAnagram ? 1 : 0),
-    ended: isFaceDownEmpty(next),
+    ended: false,
   };
 }
 

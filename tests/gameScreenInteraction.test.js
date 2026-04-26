@@ -576,3 +576,18 @@ describe('GameScreen draw — missed-draw feedback', () => {
     expect(feedback.classes()).not.toContain('warning');
   });
 });
+
+describe('GameScreen draw button gating', () => {
+  it('disables the Draw button when the face-down pool is empty', () => {
+    const game = {
+      ...makeGame({ loose: ['a', 'b', 'c'] }),
+      pool: { faceDown: [], looseLetters: ['a', 'b', 'c'], words: [] },
+    };
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: game, dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    expect(drawBtn.attributes('disabled')).toBeDefined();
+  });
+});

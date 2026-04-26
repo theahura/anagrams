@@ -86,6 +86,28 @@ describe('drawTile', () => {
     const next = drawTile(seeded, dict);
     expect(next.ended).toBe(true);
   });
+
+  it('does not end the game when drawing the last face-down tile', () => {
+    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    const seeded = {
+      ...game,
+      pool: { ...game.pool, faceDown: ['z'], looseLetters: ['x', 'q', 'j'] },
+    };
+    const next = drawTile(seeded, dict);
+    expect(next.ended).toBe(false);
+    expect(next.pool.faceDown).toEqual([]);
+    expect(next.pool.looseLetters).toContain('z');
+  });
+
+  it('applies the missed-draw penalty when drawing the last face-down tile', () => {
+    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    const seeded = {
+      ...game,
+      pool: { ...game.pool, faceDown: ['z'], looseLetters: ['c', 'a', 't'] },
+    };
+    const next = drawTile(seeded, dict);
+    expect(next.missedDrawCount).toBe(1);
+  });
 });
 
 describe('submitWord', () => {

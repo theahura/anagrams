@@ -2119,3 +2119,139 @@ work). The visible behaviour is what we test.
 - [Deque: Screen readers and punctuation](https://www.deque.com/blog/dont-screen-readers-read-whats-screen-part-1-punctuation-typographic-symbols/)
 - [jamescatt.ca: Screen readers and negative numbers](https://jamescatt.ca/blog/2020/minus-the-minus-a-psa-about-screen-readers-and-negative-numbers/)
 - [NN/g: Usability heuristics applied to video games](https://www.nngroup.com/articles/usability-heuristics-applied-video-games/)
+
+## Allow play after the final draw (v17 commit)
+
+### Problem
+
+`src/game.js#drawTile` returns `{ ..., ended: isFaceDownEmpty(next) }` —
+i.e., when the player draws the **last** face-down tile, the game ends
+immediately and the just-revealed letter is never playable. The score
+screen displays whatever words the player has formed up to (but not
+including) any plays involving that final tile.
+
+This is a real UX paper-cut: the most informative tile in the run (the
+one that *just* completed the visible pool) is announced and then
+yanked away in the same action.
+
+### Canonical rule (independently confirmed)
+
+Every authoritative source on Snatch / Anagrams says the bag-empty
+event is necessary but **not sufficient** for the game to end:
+
+- **Wikipedia — Anagrams (game)**: "The game ends when all tiles are
+  face up *and* no further words can be formed."
+  ([source](https://en.wikipedia.org/wiki/Anagrams_(game)))
+- **Bananagrammer blog (Snatch a.k.a. Anagrams)**: "When all the tiles
+  have been turned over, play continues until everyone decides that
+  there are no more moves to make and quits."
+  ([source](http://www.bananagrammer.com/2009/07/game-of-snatch-aka-anagrams.html))
+
+The current implementation contradicts both. The "end after last
+draw" branch was a v1 simplification, never re-examined.
+
+### Bananagrams (sibling tile-bag game)
+
+In multi-player Bananagrams, the bag-empty trigger is the player who
+empties their hand calling "BANANAS" — the final drawn letter is
+always usable. In Banana Solitaire (single-player), the explicit goal
+is to use **all 144 tiles**, so the game ends on hand-empty (not
+bag-empty). Both reinforce the principle: the player retains agency
+over the last drawn letter.
+([Ultraboardgames rules](https://www.ultraboardgames.com/bananagrams/game-rules.php),
+[Nanagrams Banana Solitaire](https://nanagrams.io/blog/bananagrams-rules-explained))
+
+### Solo word-game UX precedent
+
+NYT Spelling Bee, Wordscapes, Bookworm, Letterpress — all end on
+either a level-completion event, a time-box, or an explicit player
+quit. None auto-end on a depleted resource. Forcing a state
+transition without letting the player act on the most recent reveal
+is the "yanked rug" anti-pattern documented in Procreator's game UI
+guide.
+([Procreator: Game UI best practices](https://procreator.design/blog/best-practices-for-game-ui-design/),
+[NYT Spelling Bee — Wikipedia](https://en.wikipedia.org/wiki/The_New_York_Times_Spelling_Bee))
+
+### Decision
+
+Drop the `ended: isFaceDownEmpty(next)` clause from `drawTile`. After
+the change:
+
+- Drawing the last face-down tile updates the loose pool and returns
+  `ended: false`. Player keeps playing.
+- The Draw button's existing `:disabled="!canDraw"` (`canDraw =
+  faceDownCount > 0`) prevents redundant draws once the pool is empty
+  — same UX signal already in place.
+- The game ends through one of two paths:
+  - **Explicit quit**: player clicks "End game" in `GameScreen`. Wired
+    to `finishGame()` already.
+  - **Defensive `next === null`**: if some future bug attempted a draw
+    on an empty pool, `drawTile` still returns `ended: true`. Dead
+    code under the disabled-button invariant, but a cheap safeguard.
+
+The existing `tests/game.test.js` line 80–89 test `marks game as
+ended when face-down was empty` exercises the defensive path
+(seeding `faceDown: []`). It continues to pass without modification —
+the defensive branch is unchanged. The new behaviour needs new test
+coverage for the "draw last tile, game continues" path.
+
+### Why not auto-end on hand-empty (all tiles consumed in words)?
+
+Tempting symmetry: bag-empty AND hand-empty → no possible moves → end.
+Rejected for two reasons:
+
+1. The player might want to take credit for the last word, see the
+   board momentarily, then end intentionally — the "moment of
+   savouring" is part of the puzzle-game feel.
+2. Detecting "no possible word from loose pool + existing words" is
+   the expensive search problem that `hasLoosePoolAnagram` only
+   approximates (loose pool only, no steals). Running it on every
+   state change is wasted compute for negligible UX benefit.
+
+Manual end via the existing button is the correct solo adaptation of
+"everyone agrees no more moves" from canonical Snatch.
+
+### Tests
+
+Add to `tests/game.test.js`:
+
+1. **"does not end the game when drawing the last face-down tile"** —
+   Seed a game with `faceDown: ['z']` and any non-empty `looseLetters`;
+   call `drawTile`; assert `next.ended === false` AND
+   `next.pool.faceDown.length === 0` AND
+   `next.pool.looseLetters.length === game.pool.looseLetters.length + 1`.
+   This is the headline regression — the previous behaviour set
+   `ended: true` here.
+2. **"missed-draw penalty still applies when drawing the last tile"** —
+   Seed `faceDown: ['z']` and `looseLetters: ['c','a','t']`; call
+   `drawTile`; assert `next.missedDrawCount === 1`. The penalty path
+   is independent of the end condition; this regression test locks
+   that.
+
+The pre-existing test `marks game as ended when face-down was empty`
+(line 80–89) covers the defensive `next === null` path and stays.
+
+### Out of scope (intentional)
+
+- Auto-detecting "no possible word from loose pool + existing words"
+  to auto-end. Expensive; brittle; YAGNI per the v1/v2 search-cost
+  decisions.
+- Changing the "End game" button's prominence / wording when the bag
+  empties (e.g., flipping it to "Finish game"). Visual polish; no
+  spec impact; deferred until play-tester feedback says the current
+  affordance is unclear.
+- Showing a "bag empty" badge in the game-info row. Same as above.
+- Updating the `GameScreen.vue` `onDraw` handler — it already calls
+  `finishGame()` only when `next.ended` is true. With the change,
+  that branch becomes unreachable through normal play (as intended);
+  unreachable but cheap to keep as defence-in-depth.
+
+### Sources
+
+- [Wikipedia — Anagrams (game)](https://en.wikipedia.org/wiki/Anagrams_(game))
+- [Bananagrammer blog — The game of Snatch (a.k.a. Anagrams)](http://www.bananagrammer.com/2009/07/game-of-snatch-aka-anagrams.html)
+- [UltraBoardGames — Bananagrams Rules](https://www.ultraboardgames.com/bananagrams/game-rules.php)
+- [Nanagrams — Bananagrams Rules Explained (incl. Banana Solitaire)](https://nanagrams.io/blog/bananagrams-rules-explained)
+- [NYT Spelling Bee — Wikipedia](https://en.wikipedia.org/wiki/The_New_York_Times_Spelling_Bee)
+- [Procreator — Game UI Design Best Practices](https://procreator.design/blog/best-practices-for-game-ui-design/)
+
