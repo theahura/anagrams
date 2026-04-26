@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateShareText } from '../src/share.js';
+import { generateShareText, generateShareAltText } from '../src/share.js';
 
 describe('generateShareText — daily mode', () => {
   it('includes the date and final score', () => {
@@ -385,4 +385,325 @@ describe('generateShareText — truncation', () => {
     const rows = text.match(rowRe) || [];
     expect(rows.length).toBe(6);
   });
+});
+
+describe('generateShareAltText', () => {
+  it('daily-mode header includes a humanized date and score, no YYYY-MM-DD', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 142,
+      longestWord: 'redefine',
+      totalTimeMs: 5 * 60 * 1000,
+      history: [],
+    });
+    expect(text).not.toMatch(/2026-04-25/);
+    expect(text).toMatch(/April 25 2026/);
+    expect(text).toContain('142');
+  });
+
+  it('random-mode header reads "random run" with no date', () => {
+    const text = generateShareAltText({
+      mode: 'random',
+      score: 50,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      history: [],
+    });
+    expect(text).not.toMatch(/\d{4}/);
+    expect(text.toLowerCase()).toContain('random run');
+    expect(text).toContain('50');
+  });
+
+  it('emits "Word 1: 4 new letters." for a single root-word history entry', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 16,
+      longestWord: 'rook',
+      totalTimeMs: 30000,
+      history: [{ word: 'rook', parents: [] }],
+    });
+    expect(text).toContain('Word 1: 4 new letters.');
+  });
+
+  it('emits "Word K: M carried, N new." for a single steal entry', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 25,
+      longestWord: 'brook',
+      totalTimeMs: 60000,
+      history: [
+        { word: 'rook', parents: [] },
+        { word: 'brook', parents: ['rook'] },
+      ],
+    });
+    expect(text).toContain('Word 1: 4 new letters.');
+    expect(text).toContain('Word 2: 4 carried, 1 new.');
+  });
+
+  it('numbers words 1..N consecutively for a multi-row history', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 100,
+      longestWord: 'redefine',
+      totalTimeMs: 60000,
+      history: [
+        { word: 'fine', parents: [] },
+        { word: 'refine', parents: ['fine'] },
+        { word: 'redefine', parents: ['refine'] },
+      ],
+    });
+    expect(text).toContain('Word 1:');
+    expect(text).toContain('Word 2:');
+    expect(text).toContain('Word 3:');
+    expect(text).not.toContain('Word 4:');
+  });
+
+  it('footer includes "Longest word N letters." when longestWord is set', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 64,
+      longestWord: 'redefine',
+      totalTimeMs: 60000,
+      history: [],
+    });
+    expect(text).toContain('Longest word 8 letters.');
+  });
+
+  it('footer omits the longest sentence when longestWord is empty', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 60000,
+      history: [],
+    });
+    expect(text).not.toMatch(/Longest/);
+  });
+
+  it('time under 60s renders as "Time N seconds." (singular for 1)', () => {
+    const t45 = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 45000,
+      history: [],
+    });
+    expect(t45).toContain('Time 45 seconds.');
+
+    const t1 = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 1000,
+      history: [],
+    });
+    expect(t1).toContain('Time 1 second.');
+  });
+
+  it('time exactly N minutes (no remainder seconds) renders as "Time M minutes."', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 5 * 60 * 1000,
+      history: [],
+    });
+    expect(text).toContain('Time 5 minutes.');
+    expect(text).not.toMatch(/seconds/);
+  });
+
+  it('time with minutes and seconds renders as "Time M minutes N seconds."', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 5 * 60 * 1000 + 23 * 1000,
+      history: [],
+    });
+    expect(text).toContain('Time 5 minutes 23 seconds.');
+  });
+
+  it('singular minute form when time is exactly 1 minute', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 60000,
+      history: [],
+    });
+    expect(text).toContain('Time 1 minute.');
+  });
+
+  it('streak suffix "Streak N." appears in daily mode when streak >= 2', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 100,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      history: [],
+      streak: 5,
+    });
+    expect(text).toContain('Streak 5.');
+  });
+
+  it('streak suffix is suppressed when streak is 0 or 1', () => {
+    const t0 = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 100,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      history: [],
+      streak: 0,
+    });
+    const t1 = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 100,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      history: [],
+      streak: 1,
+    });
+    expect(t0).not.toMatch(/Streak/);
+    expect(t1).not.toMatch(/Streak/);
+  });
+
+  it('streak suffix is suppressed in random mode regardless of streak value', () => {
+    const text = generateShareAltText({
+      mode: 'random',
+      score: 100,
+      longestWord: 'rook',
+      totalTimeMs: 60000,
+      history: [],
+      streak: 5,
+    });
+    expect(text).not.toMatch(/Streak/);
+  });
+
+  it('truncates with head-3 + elision sentence + tail-3 when history has more than 6 rows', () => {
+    const history = [
+      { word: 'aaa', parents: [] },
+      { word: 'bbbb', parents: [] },
+      { word: 'ccccc', parents: [] },
+      { word: 'dddddd', parents: [] },
+      { word: 'eeeeeee', parents: [] },
+      { word: 'ffffffff', parents: [] },
+      { word: 'ggggggggg', parents: [] },
+      { word: 'hhhhhhhhhh', parents: [] },
+      { word: 'iiiiiiiiiii', parents: [] },
+      { word: 'jjjjjjjjjjjj', parents: [] },
+    ];
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 500,
+      longestWord: 'jjjjjjjjjjjj',
+      totalTimeMs: 60000,
+      history,
+    });
+    const wordLines = text.split('\n').filter((l) => /^Word \d+:/.test(l));
+    expect(wordLines.length).toBe(6);
+    expect(wordLines[0]).toContain('Word 1:');
+    expect(wordLines[1]).toContain('Word 2:');
+    expect(wordLines[2]).toContain('Word 3:');
+    expect(wordLines[3]).toContain('Word 8:');
+    expect(wordLines[4]).toContain('Word 9:');
+    expect(wordLines[5]).toContain('Word 10:');
+    expect(text).toMatch(/4 more words/);
+  });
+
+  it('truncation elision uses singular "more word" when exactly 1 word is dropped', () => {
+    const history = Array.from({ length: 7 }, (_, i) => ({
+      word: 'x'.repeat(i + 3),
+      parents: [],
+    }));
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 60000,
+      history,
+    });
+    expect(text).toMatch(/1 more word\b/);
+    expect(text).not.toMatch(/1 more words/);
+  });
+
+  it('emits all rows verbatim when history has 6 or fewer rows', () => {
+    const history = Array.from({ length: 6 }, (_, i) => ({
+      word: 'x'.repeat(i + 3),
+      parents: [],
+    }));
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 60000,
+      history,
+    });
+    const wordLines = text.split('\n').filter((l) => /^Word \d+:/.test(l));
+    expect(wordLines.length).toBe(6);
+    expect(text).not.toMatch(/more word/);
+  });
+
+  it('emits header and footer only when history is empty (no Word lines)', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 0,
+      longestWord: '',
+      totalTimeMs: 60000,
+      history: [],
+    });
+    expect(text).not.toMatch(/Word \d+:/);
+    expect(text).toContain('April 25 2026');
+    expect(text).toContain('Time');
+  });
+
+  it('output contains zero emoji code points', () => {
+    const history = [
+      { word: 'rook', parents: [] },
+      { word: 'brook', parents: ['rook'] },
+      { word: 'redefine', parents: ['refine'] },
+    ];
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 100,
+      longestWord: 'redefine',
+      totalTimeMs: 60000,
+      history,
+      streak: 3,
+    });
+    expect(text).not.toMatch(/[\u{1F7E8}-\u{1F7E9}]/u);
+  });
+
+  it('output contains zero em-dash and zero middle-dot characters', () => {
+    const text = generateShareAltText({
+      mode: 'daily',
+      date: '2026-04-25',
+      score: 100,
+      longestWord: 'redefine',
+      totalTimeMs: 60000,
+      history: [{ word: 'rook', parents: [] }],
+      streak: 3,
+    });
+    expect(text).not.toMatch(/—/);
+    expect(text).not.toMatch(/·/);
+  });
+
 });

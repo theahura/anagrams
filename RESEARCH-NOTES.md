@@ -1753,3 +1753,212 @@ truncation', …)` block:
 - Compaction-style re-encoding (one emoji per word). Loses the
   steal/add signal that makes Anagrams' grid informative; rejected
   above.
+
+## Screen-reader alt-text share variant (v15 commit)
+
+Open follow-up from CURRENT-PROGRESS.md v14: "Aria-label 'alt text'
+share variant for screen readers (per Slate's Wordle-accessibility
+piece, wa11y.co does this for Wordle). Real concern but separate from
+the Twitter truncation work."
+
+### The problem
+
+Today `generateShareText` emits `🟩🟩🟩🟩\n🟨🟨🟨🟨🟩🟩\n…`. Screen
+readers (NVDA, VoiceOver, JAWS, TalkBack) announce each emoji by its
+Unicode CLDR name: "green square. green square. green square.
+green square. yellow square. yellow square…". This is the canonical
+Wordle accessibility complaint
+([Christian Heilmann demo](https://christianheilmann.com/2022/01/19/ever-wondered-what-a-wordle-social-media-update-sounds-to-screenreader-users/),
+[Slate Feb 2022](https://slate.com/culture/2022/02/wordle-word-game-results-accessibility-twitter.html)).
+WCAG H86 specifically covers this: emoji/ASCII-art content needs a
+text alternative ([w3.org H86](https://www.w3.org/WAI/WCAG20/Techniques/html/H86)).
+
+### Format research
+
+`wa11y.co` (Cariad Eccleston's Wordle alt-text generator) is the de
+facto industry-standard format. Verbatim sample:
+
+```
+Line 1: Nothing.
+Line 2: 2nd perfect, but 4th in the wrong place.
+Line 3: 2nd and 5th perfect, but 1st and 3rd in the wrong place.
+Line 4: 2nd, 3rd, 4th and 5th perfect.
+Line 5: Won!
+```
+
+Conventions extracted: `Line N:` row prefix, one sentence per row,
+period terminator, plain words (no emoji, no symbols).
+
+Slate piece does NOT prescribe a text format — it endorses the
+"screenshot of grid + alt text via wa11y.co" workflow transitively.
+
+Other variants (Octordle, Quordle, 64ordle, Mayank's accessible
+clone) do not publish their alt-text templates. WordleBot iOS shortcut
+generates image+alt-text pairs.
+
+### Pronunciation gotchas
+
+- **Em-dash `—` (U+2014)** and **middle-dot `·` (U+00B7)** are
+  unreliable across screen readers — sometimes silent, sometimes
+  "dash"/"middle dot" ([CSUN dashes-and-hyphens guide](https://news.csun.edu/accessibility/accessibility-tip-on-dashes-and-hyphens/),
+  [WebAIM thread](https://webaim.org/discussion/mail_thread?thread=4088)).
+  Replace both with periods or "and" in alt text.
+- **`YYYY-MM-DD`** reads as "two thousand twenty-six dash zero four
+  dash twenty-five" on TalkBack/VoiceOver. Use `Month DD YYYY` in
+  alt text.
+- **Numerals**: "Score 142" reads naturally as "score one hundred
+  forty-two." Don't word-spell the numbers.
+- **Emoji-as-content** is not "alt text" in HTML's `alt` sense — it
+  is content. Screen readers announce the emoji name regardless of
+  surrounding markup ([BOIA on emoji a11y](https://www.boia.org/blog/emojis-and-web-accessibility-best-practices)).
+  Solution: provide a separate, opt-in plain-text variant the user
+  can choose to copy.
+
+### X/Twitter alt-text constraint
+
+X's per-image alt-text field accepts up to **1000 characters**
+([Lireo guide](https://www.lireo.com/what-to-know-twitter-alternative-text-images/)).
+Bluesky's alt text field accepts up to 2000. Both are well above the
+length any Anagrams play would generate (≤30 word lines × ~30 chars
+each + header/footer ≈ 1000 in the absolute worst case; typical
+plays 200–400 chars). Truncation is not a binding constraint here.
+
+### Decision: separate `generateShareAltText` + secondary "Copy as alt
+text" button
+
+- **Sibling export, not modification of `generateShareText`**: the
+  primary Share button stays the canonical emoji grid (Twitter share-
+  card workflow). Doubling text with a parallel narrative
+  description would (a) blow past the 280-char weighted budget the
+  v14 truncator was specifically built to respect, and (b) confuse
+  the social/casual reader.
+- **Secondary "Copy as alt text" button** on both surfaces that
+  already host a Share button (`ScoreScreen.vue` and the
+  `HomeScreen.vue` calendar popover). Same gating as Share —
+  rendered iff `record.history` (or `result.history`) is non-empty.
+- Per-cell history was added in v12 and the Twitter-truncation in
+  v14; this is the third leg in the share-text family, all sharing
+  one source of game data.
+
+### Format spec for Anagrams
+
+```
+Anagrams, daily April 25 2026. Score 142.
+Word 1: 4 new letters.
+Word 2: 4 carried, 2 new.
+Word 3: 6 carried, 2 new.
+Longest word 8 letters. Time 5 minutes.
+```
+
+Random-mode header: `Anagrams, random run. Score 50.` (no date).
+
+Per-row variants:
+- 0 carried, N new (root word, no parents): `Word K: N new letters.`
+- M carried, N new: `Word K: M carried, N new.`
+- M carried, 0 new (impossible — same-length rearrangement is
+  rejected by `canFormWord` at submit time, so any history entry has
+  added ≥ 1).
+
+Footer streak: append `Streak N.` (period, not middle-dot prefix)
+when daily and streak ≥ 2.
+
+Truncation: if `history.length > 6` (same threshold as the emoji
+grid), apply head-3 / tail-3 with an elision sentence: `…and N more
+words…`. Threshold + format mirror the emoji-grid truncation so the
+two outputs describe the same play structurally.
+
+### Edge cases
+
+- `longestWord` empty: omit the "Longest word" sentence entirely
+  (already what the emoji version does).
+- `totalTimeMs` < 60s: render as `Time N seconds.` (e.g. `45
+  seconds`). Matches reword's a11y precedent of avoiding the
+  ambiguous `0:45` mm:ss form when humanizing.
+- `history` empty (a player who drew until the deck was empty
+  without forming a word): emit header + footer only, no `Word`
+  lines — exact parity with the emoji version.
+- Streak === 1: omit (matches emoji output suppressing `Streak 1`).
+
+### Out of scope
+
+- Auto-detecting screen-reader presence and swapping the primary
+  button. Forced-detection is unreliable
+  ([Marco's Accessibility Blog](https://marcozehe.de/why-screen-readers-cant-be-detected/));
+  always-visible secondary button is the correct UX.
+- Per-share-context customization (Twitter alt vs Bluesky alt vs
+  Slack /me). One format works for all 1000+ char alt fields.
+- Speech-only modality (TTS file). Alt-text is text-only; rendering
+  is the consumer's job.
+- Emoji-grid replacement. The emoji form remains the default; alt
+  text is opt-in additive.
+
+### Tests (TDD plan)
+
+`tests/share.test.js` — new `describe('generateShareAltText', …)`
+block, ~10 tests asserting plaintext behavior:
+
+1. Daily mode header includes humanized date and score (no `—`,
+   `·`, `YYYY-MM-DD`).
+2. Random mode header reads "random run" with no date.
+3. Single-row history with no parents: `Word 1: 4 new letters.`
+4. Single-row history with one parent: `Word K: M carried, N new.`
+5. Multi-row history numbers words 1-N consecutively.
+6. Footer includes `Longest word N letters.` when longest word
+   exists.
+7. Footer omits longest sentence when `longestWord` is empty/null.
+8. Footer time `< 60s` rendered as `N seconds.`; `>= 60s` rendered
+   as `M minutes N seconds.` or `M minutes.` if `s === 0`.
+9. Streak suffix `Streak N.` appears in daily mode when streak ≥ 2;
+   absent for streak 0/1 or random mode.
+10. History.length > 6 triggers truncation: head-3 + elision
+    `…and X more words…` + tail-3 sentences. Total word-line count
+    7.
+11. History.length ≤ 6 emits all rows verbatim, even if individual
+    rows are long.
+12. Output contains zero emoji (assert `!/[\u{1F7E8}-\u{1F7E9}]/u`).
+13. Output contains zero em-dash and zero middle-dot.
+14. Determinism: same inputs → byte-identical output.
+
+`tests/scoreScreen.test.js` (new file or extend existing) — add
+"Copy as alt text" button rendering + click behavior:
+
+15. Renders `Copy alt text` button when `result.history` is
+    non-empty.
+16. Does NOT render the button when `result.history` is empty/null.
+17. Click invokes `navigator.clipboard.writeText` once with text
+    that contains "Word 1:" and the score.
+18. Falls back to `window.prompt` on clipboard rejection.
+19. Click flips button label to "Copied!" for 2s then back.
+
+`tests/homeScreen.test.js` — extend `popover — share` block:
+
+20. Renders `Copy alt text` button in the popover when
+    `record.history` is non-empty.
+21. Does NOT render when history absent or empty.
+22. Click invokes clipboard with text containing the entry's date
+    and score, no emoji.
+23. Falls back to prompt on rejection.
+24. Switch-to-different-cell after clicking Copy alt text resets
+    label.
+
+### What does NOT change
+
+- `generateShareText` — bytewise unchanged. All 22 existing share
+  tests must continue to pass.
+- Domain modules (`game.js`, `pool.js`, `scoring.js`, etc.) —
+  untouched.
+- Storage schema — no shape change.
+- CSS palette — only need a new selector for the secondary button
+  (or reuse `.action-btn` directly — TBD in plan).
+- Primary Share button — visible label, position, and behavior all
+  unchanged.
+
+### Sources
+
+- [wa11y.co — Wordle accessibility tool](https://wa11y.co/)
+- [Slate — Wordle game results accessibility (Feb 2022)](https://slate.com/culture/2022/02/wordle-word-game-results-accessibility-twitter.html)
+- [W3C WCAG H86 — Text alternatives for emoji/ASCII art](https://www.w3.org/WAI/WCAG20/Techniques/html/H86)
+- [Christian Heilmann — Wordle screen-reader demo](https://christianheilmann.com/2022/01/19/ever-wondered-what-a-wordle-social-media-update-sounds-to-screenreader-users/)
+- [Lireo — Twitter alt text 1000-char limit](https://www.lireo.com/what-to-know-twitter-alternative-text-images/)
+- [BOIA — Emojis and web accessibility](https://www.boia.org/blog/emojis-and-web-accessibility-best-practices)
+- [CSUN — Dashes and hyphens accessibility](https://news.csun.edu/accessibility/accessibility-tip-on-dashes-and-hyphens/)

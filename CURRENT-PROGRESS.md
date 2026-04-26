@@ -1206,6 +1206,155 @@ limit (v14 commit)."
   (was 103.64 kB / 39.89 kB; +0.28 kB raw for the truncation
   branch + helpers).
 
+### `feat/initial-game` — Screen-reader alt-text share variant (this commit)
+
+Closes the v14 open follow-up "Aria-label 'alt text' share variant for
+screen readers (per Slate's Wordle-accessibility piece, wa11y.co does
+this for Wordle)." Today `generateShareText` emits an emoji grid that
+screen readers (NVDA, VoiceOver, JAWS, TalkBack) announce as "green
+square. green square. green square…" — the canonical Wordle a11y
+complaint and a documented WCAG H86 violation. After this commit, both
+share surfaces (final Score screen + Home-calendar popover) expose a
+sibling "Copy alt text" button that copies a plaintext narrative form
+of the same play. Pure additive change: `generateShareText` is bytewise
+unchanged; the primary Share button keeps the canonical emoji grid for
+social posting.
+
+#### Format
+
+```
+Anagrams, daily April 25 2026. Score 142.
+Word 1: 4 new letters.
+Word 2: 4 carried, 2 new.
+Word 3: 6 carried, 2 new.
+Longest word 8 letters. Time 5 minutes 23 seconds. Streak 5.
+```
+
+Random-mode header: `Anagrams, random run. Score 50.` Per row,
+`parents.length === 0` → `Word K: N new letters.`; else → `Word K: M
+carried, N new.` (M = sum parent lengths, N = word.length − M ≥ 1
+since v13 rejects same-length rearrangements). Time: `< 60s` →
+`N seconds`; `>= 60s` and `s===0` → `M minutes`; else → `M minutes N
+seconds`. Singular forms (1 second / 1 minute / 1 new letter / 1 more
+word) explicit. Truncation parity with the emoji form: `history.length
+> 6` → head-3 + `…and N more word(s)…` + tail-3.
+
+#### What changed
+- `src/share.js` — new exported `generateShareAltText({mode, date,
+  score, longestWord, totalTimeMs, history, streak})`. Same input
+  shape as `generateShareText`, returns a plaintext string.
+  Private helpers `assembleAlt`, `sentenceFor`, `humanizeDate`,
+  `humanizeTime`, plus a `MONTH_NAMES` array. Reuses the existing
+  `HEAD_KEEP=3`/`TAIL_KEEP=3` truncation thresholds. Emits **no
+  emoji, no em-dash (`—`), no middle-dot (`·`), no `YYYY-MM-DD`** —
+  all four are read poorly by screen readers (CSUN dashes guide,
+  WebAIM thread, BOIA emoji guidance).
+- `src/components/ScoreScreen.vue` — added `copiedAlt` ref,
+  `canCopyAlt` computed (`Array.isArray(result.history) &&
+  result.history.length > 0`), `onCopyAltText()` handler. New
+  `<button class="action-btn">{{ copiedAlt ? 'Copied!' : 'Copy alt
+  text' }}</button>` in `.score-actions` between the primary Share
+  button and Home, gated on `canCopyAlt`. Extracted
+  `buildShareArgs()` so `onShare`/`onCopyAltText` share argument
+  construction.
+- `src/components/HomeScreen.vue` — added `copiedAltDay` ref,
+  `copiedAltTimer` (paralleling existing `copiedDay`), and an
+  async `copyAltSelectedDay()` handler. New sibling `<button
+  class="action-btn day-popover-share day-popover-share-alt">`
+  inside the popover panel, gated on the same `canShareSelected`
+  predicate as the primary Share button. Both timers reset on
+  `onCellClick` (cell-to-cell switch) and `closePopover` (any
+  dismiss). Same `startedFor = selectedIndex.value` race-guard
+  pattern from v12 replicated for the alt-text handler. Extracted
+  `buildSelectedShareArgs(entry)` helper.
+- No CSS changes (existing `.action-btn` and `.day-popover-share`
+  rules cover the new button; CSS modifier class
+  `.day-popover-share-alt` reserved for future styling but
+  currently unused).
+- No domain-module changes (`game.js`, `pool.js`, `scoring.js`,
+  `anagramRules.js`, `dictionary.js`, `staging.js`, `storage.js`,
+  `trivialInflection.js`, `dateKey.js`, `tiles.js`, `prng.js` are
+  untouched). No `SCHEMA_VERSION` bump (no persisted shape
+  change).
+
+#### Tests added
+- `tests/share.test.js` — new `describe('generateShareAltText',
+  …)` block, 21 tests: humanized-date header (no `YYYY-MM-DD`);
+  random-mode header reads "random run" with no date; single-row
+  no-parents → `Word 1: 4 new letters.`; single-row one-parent →
+  `Word K: M carried, N new.`; multi-row consecutive numbering;
+  `Longest word N letters.` present when `longestWord` set;
+  omitted when empty/null; time `< 60s` → `Time N seconds.`
+  (singular `1 second`); time exactly `M:00` → `Time M minutes.`;
+  time mixed → `Time M minutes N seconds.`; time exactly 1 minute
+  → `Time 1 minute.` (singular); streak suffix daily ≥2 only;
+  suppressed for streak 0/1; suppressed in random mode regardless;
+  `history.length > 6` truncates with head-3 + `…and N more
+  words…` + tail-3 (asserted via word-line filter); singular
+  `…1 more word…` form when exactly 1 dropped; ≤6 rows verbatim;
+  empty history → header + footer only; no emoji code points
+  (`!/[\u{1F7E8}-\u{1F7E9}]/u`); no em-dash and no middle-dot;
+  determinism.
+- `tests/scoreScreen.test.js` (new file) — 8 tests: button
+  rendered when `result.history` non-empty; not rendered when
+  empty; not rendered when missing; click invokes
+  `navigator.clipboard.writeText` once with text containing
+  `Word 1:` and the score, no emoji; falls back to `window.prompt`
+  on rejection; label flips to `Copied!` after success; alt-text
+  click does NOT flip the primary Share button label
+  (independence); regression test that the primary Share button
+  still copies emoji-grid output.
+- `tests/homeScreen.test.js` — 5 new tests appended to the
+  existing `popover — share` block: button rendered when
+  `record.history` non-empty; not rendered without history;
+  not rendered when history empty; click writes plaintext
+  containing the entry's date words and score, no emoji; falls
+  back to `window.prompt` on rejection (prompt text contains
+  score and `Word 1:`); switch-to-different-cell after copying
+  alt-text resets the button label back to `Copy alt text`.
+
+#### Documentation
+- `src/docs.md` — replaced the single "Share text contract" Core
+  Implementation bullet with five bullets covering the dual-
+  serializer contract, the emoji-grid form, the emoji-form
+  Twitter-budget truncation, the alt-text form (header shapes,
+  per-row sentence shapes, footer formatting, time/date
+  humanization, singular forms), and the alt-text truncation
+  parity with the emoji form. Added two Things-to-Know entries
+  on (a) why two serializers / two buttons rather than auto-
+  detection or a merged share (with explicit out-of-scope items)
+  and (b) the alt-text pronunciation invariants (no emoji, no
+  em-dash, no middle-dot, no raw `YYYY-MM-DD`).
+- `src/components/docs.md` — new Core Implementation bullet
+  "Share surfaces — dual buttons" capturing the cross-component
+  invariant. Rewrote the HomeScreen popover Share-button bullet
+  to cover both buttons (`buildSelectedShareArgs` helper, both
+  copy-feedback flags resetting on close/cell-switch, race guard
+  applies to both handlers). Rewrote the ScoreScreen bullet
+  with `canCopyAlt`, `buildShareArgs`, parallel `copied` /
+  `copiedAlt` refs, and the form-specific streak-suffix
+  separators.
+- `RESEARCH-NOTES.md` — appended a "Screen-reader alt-text share
+  variant (v15 commit)" section covering the wa11y.co format
+  research, pronunciation gotchas (em-dash / middle-dot /
+  YYYY-MM-DD), Twitter alt-text 1000-char limit, the
+  head-3/tail-3 truncation parity decision, edge cases (root-
+  word entries skip the "carried" clause, sub-minute times,
+  streak 1 suppression, singular vs plural elision), the
+  decision rejection of auto-detection (per
+  `marcozehe.de`), and explicit out-of-scope items (TTS file,
+  per-platform alt variants).
+
+#### Verified
+- `npm test` — 236/236 passing (was 202; +20 share + 8 new
+  scoreScreen file + 5 homeScreen + 1 regression on the primary
+  Share button = 34 new tests).
+- `npm run build` — production bundle builds cleanly in 0.66 s.
+  CSS unchanged at 9.26 kB. JS at 106.14 kB raw / 40.56 kB
+  gzipped (was 103.92 kB / 40.02 kB; +2.22 kB raw / +0.54 kB
+  gzipped for the new exported function plus two button
+  handlers).
+
 ## Open follow-ups (next commits)
 
 - Score-tier color heatmap on calendar cells (currently boolean
@@ -1219,6 +1368,3 @@ limit (v14 commit)."
 - Mobile composition-input support for the trail-based input model
   (Android Chrome / GBoard `insertCompositionText` currently demotes
   the trail to all-typed entries, losing identity).
-- Aria-label "alt text" share variant for screen readers (per Slate's
-  Wordle-accessibility piece, wa11y.co does this for Wordle). Real
-  concern but separate from the Twitter truncation work.

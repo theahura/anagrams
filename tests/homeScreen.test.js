@@ -540,4 +540,207 @@ describe('HomeScreen day-detail popover — share', () => {
     expect(promptText).toContain('99');
     wrapper.unmount();
   });
+
+  it('renders a Copy alt text button when the selected entry has a non-empty history', async () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 52,
+          longestWord: 'refine',
+          durationMs: 60000,
+          history: [
+            { word: 'fine', parents: [] },
+            { word: 'refine', parents: ['fine'] },
+          ],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const altBtn = buttons.find((b) => b.textContent.trim() === 'Copy alt text');
+    expect(altBtn).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('does not render Copy alt text when the selected entry has no history', async () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 100,
+          longestWord: 'word',
+          durationMs: 60000,
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const altBtn = buttons.find((b) => b.textContent.trim() === 'Copy alt text');
+    expect(altBtn).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('does not render Copy alt text when history is empty', async () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 30,
+          longestWord: 'foo',
+          durationMs: 60000,
+          history: [],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const altBtn = buttons.find((b) => b.textContent.trim() === 'Copy alt text');
+    expect(altBtn).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('clicking Copy alt text copies a plaintext narrative containing the date words and score, no emoji', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    installClipboardMock(writeText);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 52,
+          longestWord: 'refine',
+          durationMs: 60000,
+          history: [
+            { word: 'fine', parents: [] },
+            { word: 'refine', parents: ['fine'] },
+          ],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const altBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'Copy alt text'
+    );
+    altBtn.click();
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const text = writeText.mock.calls[0][0];
+    expect(text).toContain('52');
+    expect(text).toContain('April 22 2026');
+    expect(text).toContain('Word 1:');
+    expect(text).not.toMatch(/[\u{1F7E8}-\u{1F7E9}]/u);
+    wrapper.unmount();
+  });
+
+  it('Copy alt text falls back to window.prompt when the clipboard write rejects', async () => {
+    installClipboardMock(vi.fn().mockRejectedValue(new Error('denied')));
+    const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => null);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 99,
+          longestWord: 'banana',
+          durationMs: 60000,
+          history: [{ word: 'banana', parents: [] }],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const altBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === 'Copy alt text'
+    );
+    altBtn.click();
+    await flushPromises();
+
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    const promptText = promptSpy.mock.calls[0][1];
+    expect(promptText).toContain('99');
+    expect(promptText).toContain('Word 1:');
+    wrapper.unmount();
+  });
+
+  it('switching to a different cell after clicking Copy alt text resets the button label', async () => {
+    installClipboardMock(vi.fn().mockResolvedValue(undefined));
+
+    const recent = [];
+    const todayMs = Date.UTC(2026, 3, 25);
+    for (let i = 6; i >= 0; i--) {
+      const t = todayMs - i * 86400000;
+      const dateStr = new Date(t).toISOString().slice(0, 10);
+      const entry = { date: dateStr, played: false };
+      if (dateStr === '2026-04-22') {
+        entry.played = true;
+        entry.record = {
+          score: 50,
+          longestWord: 'apple',
+          durationMs: 120000,
+          history: [{ word: 'apple', parents: [] }],
+        };
+      }
+      if (dateStr === '2026-04-24') {
+        entry.played = true;
+        entry.record = {
+          score: 99,
+          longestWord: 'banana',
+          durationMs: 60000,
+          history: [{ word: 'banana', parents: [] }],
+        };
+      }
+      recent.push(entry);
+    }
+    const wrapper = mount(HomeScreen, {
+      props: { streak: 2, best: 99, completedToday: false, recent },
+      attachTo: document.body,
+    });
+    const cells = wrapper.findAll('.home-calendar-cell');
+    await cells[3].trigger('click');
+    let dialog = document.querySelector('[role="dialog"]');
+    let altBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) =>
+        b.textContent.trim() === 'Copy alt text' ||
+        b.textContent.trim() === 'Copied!'
+    );
+    altBtn.click();
+    await flushPromises();
+    expect(altBtn.textContent.trim()).toBe('Copied!');
+
+    await cells[5].trigger('click');
+    dialog = document.querySelector('[role="dialog"]');
+    const switchedAlt = Array.from(dialog.querySelectorAll('button')).find(
+      (b) =>
+        b.textContent.trim() === 'Copy alt text' ||
+        b.textContent.trim() === 'Copied!'
+    );
+    expect(switchedAlt.textContent.trim()).toBe('Copy alt text');
+    wrapper.unmount();
+  });
 });

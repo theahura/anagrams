@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { generateShareText } from '../share.js';
+import { generateShareText, generateShareAltText } from '../share.js';
 
 const props = defineProps({
   loading: { type: Boolean, default: false },
@@ -21,6 +21,8 @@ const cellRefs = ref([]);
 const panelRef = ref(null);
 const copiedDay = ref(false);
 let copiedTimer = null;
+const copiedAltDay = ref(false);
+let copiedAltTimer = null;
 
 function setCellRef(i) {
   return (el) => {
@@ -38,11 +40,8 @@ const canShareSelected = computed(() => {
   return Array.isArray(h) && h.length > 0;
 });
 
-async function shareSelectedDay() {
-  const startedFor = selectedIndex.value;
-  const entry = selectedEntry.value;
-  if (!entry?.record) return;
-  const text = generateShareText({
+function buildSelectedShareArgs(entry) {
+  return {
     mode: 'daily',
     date: entry.date,
     score: entry.record.score,
@@ -50,7 +49,14 @@ async function shareSelectedDay() {
     totalTimeMs: entry.record.durationMs,
     history: entry.record.history,
     streak: 0,
-  });
+  };
+}
+
+async function shareSelectedDay() {
+  const startedFor = selectedIndex.value;
+  const entry = selectedEntry.value;
+  if (!entry?.record) return;
+  const text = generateShareText(buildSelectedShareArgs(entry));
   try {
     await navigator.clipboard.writeText(text);
     if (selectedIndex.value !== startedFor) return;
@@ -58,6 +64,25 @@ async function shareSelectedDay() {
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => {
       copiedDay.value = false;
+    }, 2000);
+  } catch {
+    if (selectedIndex.value !== startedFor) return;
+    window.prompt('Copy your result:', text);
+  }
+}
+
+async function copyAltSelectedDay() {
+  const startedFor = selectedIndex.value;
+  const entry = selectedEntry.value;
+  if (!entry?.record) return;
+  const text = generateShareAltText(buildSelectedShareArgs(entry));
+  try {
+    await navigator.clipboard.writeText(text);
+    if (selectedIndex.value !== startedFor) return;
+    copiedAltDay.value = true;
+    if (copiedAltTimer) clearTimeout(copiedAltTimer);
+    copiedAltTimer = setTimeout(() => {
+      copiedAltDay.value = false;
     }, 2000);
   } catch {
     if (selectedIndex.value !== startedFor) return;
@@ -119,6 +144,11 @@ function onCellClick(i, ev) {
     clearTimeout(copiedTimer);
     copiedTimer = null;
   }
+  copiedAltDay.value = false;
+  if (copiedAltTimer) {
+    clearTimeout(copiedAltTimer);
+    copiedAltTimer = null;
+  }
   selectedIndex.value = i;
 }
 
@@ -129,6 +159,11 @@ function closePopover({ restoreFocus = true } = {}) {
   if (copiedTimer) {
     clearTimeout(copiedTimer);
     copiedTimer = null;
+  }
+  copiedAltDay.value = false;
+  if (copiedAltTimer) {
+    clearTimeout(copiedAltTimer);
+    copiedAltTimer = null;
   }
 }
 
@@ -287,6 +322,12 @@ onBeforeUnmount(() => {
           class="action-btn day-popover-share"
           @click="shareSelectedDay"
         >{{ copiedDay ? 'Copied!' : 'Share' }}</button>
+        <button
+          v-if="canShareSelected"
+          type="button"
+          class="action-btn day-popover-share"
+          @click="copyAltSelectedDay"
+        >{{ copiedAltDay ? 'Copied!' : 'Copy alt text' }}</button>
       </div>
     </Teleport>
 
