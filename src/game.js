@@ -2,7 +2,7 @@ import { createTileSet, shuffleTiles } from './tiles.js';
 import { getDailyRng, getRandomRng } from './prng.js';
 import { createPool, drawTile as poolDraw, formWord } from './pool.js';
 import { canFormWord } from './anagramRules.js';
-import { hasLoosePoolAnagram, finalScore } from './scoring.js';
+import { hasMissedAnagram, finalScore } from './scoring.js';
 
 const INITIAL_REVEAL = 3;
 
@@ -25,7 +25,7 @@ export function createGame({ mode, date }, dict) {
 }
 
 export function drawTile(game, dict) {
-  const hadAnagram = hasLoosePoolAnagram(game.pool.looseLetters, dict);
+  const hadAnagram = hasMissedAnagram(game.pool, dict) !== null;
   const next = poolDraw(game.pool);
   if (next === null) {
     return { ...game, ended: true };

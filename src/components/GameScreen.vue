@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { drawTile, submitWord, endGame } from '../game.js';
-import { finalScore } from '../scoring.js';
+import { finalScore, hasMissedAnagram } from '../scoring.js';
 import { highlightConsumption } from '../staging.js';
 
 const props = defineProps({
@@ -167,10 +167,15 @@ function onSubmit() {
 }
 
 function onDraw() {
-  const prevMissed = game.value.missedDrawCount;
+  const missedKind = hasMissedAnagram(game.value.pool, props.dict);
   const next = drawTile(game.value, props.dict);
   game.value = next;
-  if (next.missedDrawCount > prevMissed) {
+  if (missedKind === 'steal') {
+    feedback.value = {
+      type: 'warning',
+      text: 'Penalty: a steal was available. −10 points.',
+    };
+  } else if (missedKind === 'loose') {
     feedback.value = {
       type: 'warning',
       text: 'Penalty: a word was available. −10 points.',

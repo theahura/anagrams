@@ -108,6 +108,21 @@ describe('drawTile', () => {
     const next = drawTile(seeded, dict);
     expect(next.missedDrawCount).toBe(1);
   });
+
+  it('increments missedDrawCount when a single-parent steal was available', () => {
+    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    const seeded = {
+      ...game,
+      pool: {
+        ...game.pool,
+        looseLetters: ['b'],
+        words: [{ word: 'rook', parents: [] }],
+      },
+    };
+    const next = drawTile(seeded, dict);
+    expect(next.missedDrawCount).toBe(1);
+  });
+
 });
 
 describe('submitWord', () => {

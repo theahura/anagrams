@@ -2406,3 +2406,208 @@ shareSpy.mockRejectedValue(err);
 - [Vitest issue #8519 — Cannot redefine property](https://github.com/vitest-dev/vitest/issues/8519)
 - [Raymond Camden — Testing the Web Share API](https://www.raymondcamden.com/2023/04/20/testing-the-web-share-api)
 
+## Steal-aware missed-anagram penalty (v19 commit)
+
+### Spec gap
+
+`APPLICATION-SPEC.md` says: "We want to penalize players for asking for new
+letters when existing anagrams exist on the board." Today
+`src/scoring.js#hasLoosePoolAnagram` enumerates only 3- to 8-letter
+dictionary words formed from the **loose pool alone**. It does not detect
+**steals** — anagrams formed by combining loose tiles with letters from
+the player's existing words (e.g. `Rook` + face-up `B` → `Brook`, the
+canonical example given in the spec under "Valid anagram"). Players who
+pile up parent words and then draw without trying steals avoid the
+penalty entirely, which contradicts both the spec wording and the
+canonical Anagrams/Snatch interpretation of "anagram."
+
+### Canonical-rule research
+
+- [Anagrams (game) — Wikipedia](https://en.wikipedia.org/wiki/Anagrams_(game)):
+  "may be stolen by adding letters." Steals are the *defining* mechanic
+  of the game; treating only loose-pool plays as "anagrams" was a v1
+  simplification.
+- [The game of Snatch — Bananagrammer](http://www.bananagrammer.com/2009/07/game-of-snatch-aka-anagrams.html):
+  "if you see a word, you can snatch it at any time" — but the canonical
+  multiplayer ruleset has **no** missed-play penalty. Our solo `−10`
+  penalty is a deliberate single-player adaptation, not a port. We are
+  therefore free to define its scope; the spec wording justifies
+  extending it to steals.
+- [Anagrams — Letter Tile Games Wiki](https://lettertilegames.fandom.com/wiki/Anagrams):
+  trivial-suffix rule ("the added tiles may not simply be a suffix like
+  -S or -ING") is canonical and matches our existing
+  `isTrivialInflection` enforcement at submit time.
+
+### Solo-puzzle precedent
+
+- [Squaredle](https://squaredle.app/), [Word Hunt](https://wordhuntsolver.com/),
+  [Wordscapes](https://scrabblewordfinder.org/wordscapes-rules-and-tips):
+  no missed-play penalties (highlight-after or no signal). Our
+  `−10`/draw is on the unusual end already.
+- [NYT Connections](https://connectionsgame.org/), Spelling Bee:
+  penalize *wrong* submissions, not missed *opportunities*.
+- **No solo word-game precedent** for penalizing complex multi-source
+  plays (steals across multiple parents). The mechanic is novel here
+  and informed by the spec only.
+- Magnitude: keep `−10` (current). Do **not** stack penalties
+  per-mechanism — one `−10` per draw whether the missed play was a
+  loose-pool anagram, a steal, or both.
+
+### Multi-parent merges — fairness limit
+
+- [Stealy Anagrams — Jeff Kaufman](https://www.jefftk.com/p/stealy-anagrams):
+  even in the multiplayer game, "the game moves slowly because of
+  working-memory constraints" when steals combine multiple parent
+  words. Multi-parent merges (`rat` + `sin` → `trains`) are very hard
+  for humans to spot under draw-decision time pressure.
+- **Decision: cap parent count at 1** (`MAX_PARENT_WORDS_FOR_PENALTY = 1`).
+  Penalize missed `Rook + B → Brook`-style single-parent steals; do
+  **not** penalize missed multi-parent merges. `canFormWord`
+  continues to *accept* multi-parent merges when the player makes
+  them — the asymmetry is intentional and reflects the human-spotting
+  asymmetry. If playtester feedback says we're being too lenient,
+  raise the cap; for now, "see one steal" is the bar.
+
+### Detector legality must mirror `canFormWord`
+
+The detector must **only** flag plays the player could legally have
+made. Otherwise we'd be penalizing players for failing to attempt
+plays the game itself would reject. Three concrete rules to mirror
+from `src/anagramRules.js#canFormWord` (lines 50–114):
+
+1. **Trivial inflection** (`isTrivialInflection(candidate, parentWord,
+   dict.lemmaIndex)`): skip when any consumed parent yields a trivial
+   inflection. Canonical example: `cat` + `s` → `cats` is rejected at
+   submit time (lemma rule), so detector must NOT flag a draw as
+   missing this play.
+2. **No-new-play / length growth**: per v16 commit, when
+   `consumedWords.length > 0`, `word.length > max(parent.length)`.
+   Detector must skip same-length single-parent rearrangements
+   (`side` → `dies`).
+3. **Profanity** (`isProfane(word)`): skip. Same `bad-words` filter as
+   `canFormWord`.
+
+### Performance — bitmask enumeration with cap
+
+- [USACO Guide: Sum over Subsets DP](https://usaco.guide/plat/dp-sos),
+  [CP-Algorithms: Submask enumeration](https://cp-algorithms.com/algebra/all-submasks.html)
+  — the canonical reference for "for each subset, enumerate sub-subsets"
+  patterns. Not needed at our scale.
+- With `MAX_PARENT_WORDS_FOR_PENALTY = 1`: at most 16 single-parent
+  candidates × `2^MAX_LOOSE_SUBSET=2^8 = 256` loose subsets = **4096
+  multiset/lookup operations per detector call**. Each operation is
+  ~O(letters) work + a Map lookup. Negligible (<1 ms typical).
+- Algorithm shape: outer loop over single parent (or empty parent for
+  the loose-only case, which is the existing `hasLoosePoolAnagram`
+  path); inner loop over loose-letter subsets of size `≥ 1`; combined
+  multiset → `letterSignature` → `dict.signatureIndex.has(sig)`; then
+  for each candidate word at that signature, check trivial-inflection
+  / profanity / length-growth. Reuse `multiset`, `mergeMultiset`,
+  `letterSignature`, `signatureIndex` — all already exist.
+- **Pruning**: skip the parent loop when `pool.words.length === 0`
+  (only loose-pool case applies). Skip the loose-only case
+  (`mask=0` over loose) — that's the loose-only signature-set scan
+  already handled by `hasLoosePoolAnagram`'s subset enumeration.
+
+### API shape
+
+Two functions:
+- `hasLoosePoolAnagram(looseLetters, dict)` — **kept verbatim** as
+  the loose-only sub-check. Same signature, same behavior. Tests
+  unchanged.
+- `hasMissedAnagram(pool, dict)` — **new**. Returns `'loose' |
+  'steal' | null`. Calls `hasLoosePoolAnagram(pool.looseLetters,
+  dict)` first; if true, returns `'loose'` (loose plays are
+  conceptually simpler and more likely the player's miss). Else
+  enumerates single-parent steals; if any legal candidate exists,
+  returns `'steal'`. Else returns `null`.
+
+Why a discriminator (not a boolean): it lets the UI surface
+differentiated copy without the game state having to carry the
+discriminator across the `drawTile` boundary. UI calls
+`hasMissedAnagram(prevPool, dict)` before `drawTile` to decide the
+warning text; `drawTile` independently calls the same function (or
+a thin boolean wrapper) to decide whether to bump
+`missedDrawCount`. Cost is negligible; duplication of one
+microsecond is acceptable for one-shot per-draw work.
+
+### `drawTile` integration
+
+`src/game.js#drawTile` currently:
+```js
+const hadAnagram = hasLoosePoolAnagram(game.pool.looseLetters, dict);
+```
+Becomes:
+```js
+const hadAnagram = hasMissedAnagram(game.pool, dict) !== null;
+```
+Same boolean shape; same `+1` increment to `missedDrawCount` if
+true. The `missedDrawCount` field stays a non-discriminated count —
+the UI surfaces the *kind* of missed play locally.
+
+### UX warning copy
+
+Current: `Penalty: a word was available. −10 points.`
+
+After:
+- `kind === 'loose'`: `Penalty: a word was available. −10 points.`
+  (unchanged — preserves test compatibility for the loose case).
+- `kind === 'steal'`: `Penalty: a steal was available. −10 points.`
+  (new copy; teaches the player about the steal mechanic without
+  revealing the answer).
+
+Pronunciation invariants from v17 carried forward: Unicode minus
+`−` (U+2212), no em-dash, no ASCII hyphen-minus.
+
+### Test plan
+
+Unit tests in `tests/scoring.test.js` (under a new `describe('hasMissedAnagram', …)` block):
+- Loose-only path returns `'loose'`: pool = `{loose: ['c','a','t'], words: []}`.
+- No play available returns `null`: pool = `{loose: ['x','q','z'], words: [{word: 'qi', parents: []}]}`.
+- Single-parent steal returns `'steal'`: pool = `{loose: ['b'], words: [{word: 'rook', parents: []}]}` (Brook).
+- Trivial-inflection NOT flagged as steal: pool = `{loose: ['s'], words: [{word: 'cat', parents: []}]}` returns `null` (cats is trivial).
+- Same-length rearrangement NOT flagged as steal: would need a single-parent rearrangement scenario; e.g. pool = `{loose: [], words: [{word: 'side', parents: []}]}` returns `null` (no growth).
+- Loose path takes priority over steal path: pool = `{loose: ['c','a','t'], words: [{word: 'rook', parents: []}]}` returns `'loose'`.
+- Empty pool returns `null`.
+- Multi-parent merge NOT flagged (fairness cap): pool = `{loose: ['s','i','n'], words: [{word: 'rat', parents: []}, {word: 'er', parents: []}]}` (which would form 'trainers' via 2-parent merge) — but only if NO single-parent steal also exists for that pool. Test the cap directly.
+- Profane steals NOT flagged. Pick a TWL06 word that's also bad-words-flagged and a parent + loose combo that forms it. (May skip if no clean test word.)
+
+Integration tests in `tests/game.test.js`:
+- `drawTile` increments `missedDrawCount` when a single-parent steal was available (new — not previously covered).
+- `drawTile` does NOT increment when only a multi-parent steal was available (new — locks the cap).
+- Existing loose-pool penalty test still passes.
+
+UI tests in `tests/gameScreenInteraction.test.js` (existing
+`describe('GameScreen draw — missed-draw feedback', …)` block):
+- New: warning shows `'a steal was available'` text after a draw
+  when only a steal was the missed play (no loose-pool anagram).
+- Existing tests for loose-pool warning still pass with unchanged
+  text.
+
+### Out of scope
+
+- Multi-parent merge detection. (Fairness — see above.)
+- Word-suggestion hints / showing the actual missed word.
+- A per-game "missed steals" stats counter on the score screen.
+- Refactoring `hasLoosePoolAnagram` into `hasMissedAnagram`'s
+  internals; keep both exported (the loose-only function is a
+  useful primitive and is currently directly tested).
+- `MAX_LOOSE_SUBSET = 8` cap raise. The loose-only path already has
+  this cap (`scoring.js:5`). For the steal path we use the same
+  cap on loose-subset size (`size ≤ 8`) for symmetry — words longer
+  than 11 letters (3 parent + 8 loose) are vanishingly rare in
+  TWL06 and the game.
+
+### Sources
+
+- [Anagrams (game) — Wikipedia](https://en.wikipedia.org/wiki/Anagrams_(game))
+- [The game of Snatch — Bananagrammer](http://www.bananagrammer.com/2009/07/game-of-snatch-aka-anagrams.html)
+- [Anagrams — Letter Tile Games Wiki](https://lettertilegames.fandom.com/wiki/Anagrams)
+- [Stealy Anagrams — Jeff Kaufman](https://www.jefftk.com/p/stealy-anagrams)
+- [USACO Guide — Sum over Subsets DP](https://usaco.guide/plat/dp-sos)
+- [CP-Algorithms — Enumerating submasks](https://cp-algorithms.com/algebra/all-submasks.html)
+- [Wordscapes Rules and Tips](https://scrabblewordfinder.org/wordscapes-rules-and-tips)
+- [NYT Connections — connectionsgame.org](https://connectionsgame.org/)
+- [Word Hunt Solver](https://wordhuntsolver.com/)
+- [Squaredle](https://squaredle.app/)
+

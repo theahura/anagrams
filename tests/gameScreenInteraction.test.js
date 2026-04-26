@@ -575,6 +575,23 @@ describe('GameScreen draw — missed-draw feedback', () => {
     expect(feedback.classes()).toContain('success');
     expect(feedback.classes()).not.toContain('warning');
   });
+
+  it('shows a steal-specific warning text when only a steal was missed', async () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: ['b'], words: ['rook'] }),
+        dict,
+      },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.classes()).toContain('warning');
+    expect(feedback.text()).toContain('steal');
+    expect(feedback.text()).toContain('−10');
+  });
 });
 
 describe('GameScreen draw button gating', () => {

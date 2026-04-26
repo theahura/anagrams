@@ -1706,6 +1706,184 @@ dependencies, no `SCHEMA_VERSION` bump.
   suite covers the dispatch logic and the per-button UI
   feedback at the component-DOM level.
 
+### `feat/initial-game` — Steal-aware missed-draw penalty (this commit)
+
+Closes a long-standing spec compliance gap. The application spec
+(`APPLICATION-SPEC.md`) literally uses `Rook + B → Brook` as the
+canonical "Valid anagram" example, then says: "We want to penalize
+players for asking for new letters when existing anagrams exist on the
+board." Until this commit, `src/scoring.js#hasLoosePoolAnagram`
+enumerated only 3- to 8-letter dictionary words formed from the **loose
+pool alone** — players who piled up parent words and then drew without
+trying steals avoided the `−10` penalty entirely, defeating the
+penalty's pedagogical intent. After this commit, drawing a tile when a
+single-parent steal was available also costs `−10`, and the in-game
+live-region warning differentiates "loose-pool word" vs "steal" so the
+player can attribute the live `game.score` drop to the right kind of
+missed play.
+
+#### What changed
+- `src/scoring.js` — new exported function
+  `hasMissedAnagram(pool, dict)` returning a discriminator
+  `'loose' | 'steal' | null`. Calls existing
+  `hasLoosePoolAnagram(pool.looseLetters, dict)` first; returns
+  `'loose'` if true. Else iterates each parent word in
+  `pool.words` one at a time (single-parent steals only — the
+  loop never enumerates multi-parent subsets) and for each
+  `(parent × loose-subset of size 1..MAX_LOOSE_SUBSET=8)`
+  combination checks the combined letter signature against
+  `dict.signatureIndex` for any candidate that grows the parent
+  (must be strictly longer, must not be a trivial inflection per
+  `isTrivialInflection`, must not be profane per `isProfane`).
+  Returns `'steal'` on first hit; else `null`. Implementation
+  reuses `letterSignature`, `signatureIndex`,
+  `isTrivialInflection`, `isProfane`, and the existing
+  `subsetSignatures` generator. New imports: `isProfane` from
+  `./anagramRules.js` and `isTrivialInflection` from
+  `./trivialInflection.js`. Existing `hasLoosePoolAnagram` kept
+  exported and unchanged — it remains a useful primitive and is
+  still directly tested.
+- `src/game.js` — `drawTile`'s
+  `hasLoosePoolAnagram(game.pool.looseLetters, dict)` boolean check
+  replaced with `hasMissedAnagram(game.pool, dict) !== null`. Same
+  boolean shape, just delegates to the broader detector. Import
+  line updated. The `missedDrawCount` field semantics are
+  unchanged — still a non-discriminated count incremented by 1 on
+  any missed-anagram draw.
+- `src/components/GameScreen.vue` — `onDraw()` now calls
+  `hasMissedAnagram(game.value.pool, props.dict)` BEFORE `drawTile`
+  to obtain the discriminator, then renders differentiated warning
+  copy: `'steal'` → `'Penalty: a steal was available. −10 points.'`;
+  `'loose'` → existing `'Penalty: a word was available. −10 points.'`
+  (unchanged); `null` → cleared feedback. The post-draw `prevMissed`
+  snapshot diff was removed since the pre-draw discriminator is now
+  the canonical source of truth for the warning text. Import line
+  updated. Pronunciation invariants from v17 (Unicode minus `−`
+  U+2212, no em-dash, no hyphen-minus) carried forward verbatim.
+
+#### What did NOT change
+- No domain-module changes outside `src/scoring.js` /
+  `src/game.js` (`anagramRules.js`, `pool.js`, `staging.js`,
+  `dictionary.js`, `trivialInflection.js`, `share.js`,
+  `storage.js`, `multiset.js`, `prng.js`, `tiles.js`, `dateKey.js`
+  are untouched).
+- No `canFormWord` / submit-time legality changes. The detector is
+  a SEPARATE check that mirrors legality for a different purpose
+  (penalty triggering). Submit-time still accepts multi-parent
+  merges (`rat + sin → strain`); the asymmetry is intentional.
+- No `SCHEMA_VERSION` bump. No persisted-storage shape change.
+  Past records on disk remain valid (`missedDrawCount` is still a
+  non-discriminated count, computed and stored at game-end).
+- No share-text format change. The footer doesn't mention
+  missed-draw kind.
+- No new dependencies.
+- No CSS changes (existing `.feedback.warning` rule covers both
+  warning variants).
+
+#### A11y / fairness rationale (researched against industry sources)
+- **Single-parent steals only.** Multi-parent merges are too
+  hard for human players to spot under draw-decision time
+  pressure (Jeff Kaufman, "Stealy Anagrams":
+  https://www.jefftk.com/p/stealy-anagrams — even in the
+  multiplayer version "the game moves slowly because of working-
+  memory constraints" on multi-parent merges). Penalizing for
+  missing them would feel unfair. The asymmetry between submit-
+  time legality (multi-parent allowed) and penalty-time
+  detection (single-parent only) is deliberate and is encoded in
+  the loop structure of `hasMissedAnagram` (one parent at a
+  time), not as a separately-toggleable cap.
+- **Loose path takes priority over steal path** when both apply.
+  Loose-pool plays are conceptually simpler and more likely the
+  player's actual miss; the warning text "a word was available"
+  is gentler than "a steal was available." Locked by test #5 in
+  the new `hasMissedAnagram` block.
+- **Detector mirrors `canFormWord` legality** — only flags plays
+  the player could legally have made. Trivial-inflection check
+  (`pod + s → pods` returns `null`); profanity skip (defensive —
+  TWL06 is filtered, but `bad-words` may still flag candidates);
+  length-grow rule structurally satisfied by enumeration starting
+  at loose-subset-size = 1.
+- **Magnitude unchanged** at `−10`. Per industry research (solo
+  word games rarely penalize missed plays at all — Squaredle,
+  Word Hunt, Wordscapes, Spelling Bee), our `−10` is already on
+  the unusual end. Don't stack penalties per-mechanism — one
+  `−10` per draw whether the missed play was loose-pool, a
+  steal, or both.
+- **Differentiated warning copy** is research-backed (Squaredle
+  pattern: specific-but-not-spoiling hints teach better than
+  generic ones). The two variants share structure ("Penalty:
+  a … was available. −10 points.") and pronunciation
+  invariants.
+
+#### Tests added
+- `tests/scoring.test.js` — new
+  `describe('hasMissedAnagram', …)` block, 6 tests covering: (a)
+  loose-only path returns `'loose'`; (b) single-parent steal
+  returns `'steal'` (`rook + b → brook`); (c) no-play returns
+  `null`; (d) trivial-inflection-only steal NOT flagged
+  (`pod + s → pods` — picked because the only candidate at the
+  signature is the plural, so no non-trivial alternative
+  exists); (e) loose path takes priority over steal when both
+  exist (`{loose:['c','a','t','b'], words:['rook']}` returns
+  `'loose'`, not `'steal'`); (f) a steal that uses more than
+  one loose tile is detected (`fin + e + d → fined`). All six
+  tests use a small `pool({loose, words})` factory and
+  black-box the function.
+- `tests/game.test.js` — 1 new test under `describe('drawTile',
+  …)`: `drawTile` increments `missedDrawCount` when a single-
+  parent steal was available (`{loose:['b'],
+  words:[{word:'rook'}]}`).
+- `tests/gameScreenInteraction.test.js` — 1 new test under the
+  existing `describe('GameScreen draw — missed-draw feedback',
+  …)` block: warning text contains the substring `'steal'` and
+  `'−10'` after a draw when only a steal (not a loose-pool
+  word) was the missed play (mounted with
+  `{loose:['b'], words:['rook']}`).
+
+#### Documentation
+- `src/docs.md` — Scoring bullet rewritten to describe the
+  `hasMissedAnagram` discriminator, its delegation to
+  `hasLoosePoolAnagram` for the loose path, and its single-
+  parent steal enumeration with trivial-inflection / profanity /
+  length-grow filters. Three new Things-to-Know entries: the
+  single-parent-only fairness asymmetry (vs `canFormWord`
+  legality), the detector-mirrors-legality invariant, and the
+  loose-path priority over steal-path. Subset-enumeration cap
+  entry extended to note the steal branch uses the same
+  `MAX_LOOSE_SUBSET = 8` cap. Bag-empty entry updated to
+  reference `hasMissedAnagram` instead of the prior
+  `hasLoosePoolAnagram`.
+- `src/components/docs.md` — GameScreen missed-draw-feedback
+  bullet rewritten to describe the pre-draw `hasMissedAnagram`
+  call as the canonical source of warning text, the
+  differentiated copy (`'a steal was available'` vs `'a word was
+  available'` vs cleared), and a cross-reference to the
+  pronunciation invariants.
+- `RESEARCH-NOTES.md` — appended a "Steal-aware missed-anagram
+  penalty (v19 commit)" section with the spec gap, canonical-
+  rule research (Wikipedia / Bananagrammer / Letter Tile
+  Games), solo-puzzle precedent (Squaredle / Word Hunt /
+  Wordscapes / Connections / Spelling Bee), the multi-parent
+  fairness limit citation, the legality-mirroring rules,
+  performance enumeration analysis, the API shape (return-
+  value table), the `drawTile` integration sketch, the UX
+  warning copy, the test plan, and out-of-scope items.
+
+#### Verified
+- `npm test` — 266/266 passing (was 258; +6 hasMissedAnagram +
+  1 game integration + 1 UI). All pre-existing tests still
+  passing.
+- `npm run build` — production bundle builds cleanly. CSS
+  unchanged at 9.34 kB; JS gains ~0.4 kB raw for the new
+  `hasMissedAnagram` + `hasSingleParentSteal` helpers and the
+  differentiated warning branch.
+- End-to-end gameplay (mount the dev server, form a parent
+  word, draw a tile when a steal is available, see the
+  differentiated warning copy in the feedback box) is
+  verifiable manually but not driven from CLI; the test suite
+  covers the dispatch logic and the per-button DOM-level UI
+  feedback.
+
 ## Open follow-ups (next commits)
 
 - Score-tier color heatmap on calendar cells (currently boolean

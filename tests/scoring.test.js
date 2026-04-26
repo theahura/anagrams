@@ -6,6 +6,7 @@ import { loadDictionary } from '../src/dictionary.js';
 import {
   scoreWord,
   hasLoosePoolAnagram,
+  hasMissedAnagram,
   finalScore,
 } from '../src/scoring.js';
 
@@ -45,6 +46,53 @@ describe('hasLoosePoolAnagram', () => {
   it('returns false when fewer than 3 letters are available', () => {
     expect(hasLoosePoolAnagram(['c', 'a'], dict)).toBe(false);
     expect(hasLoosePoolAnagram([], dict)).toBe(false);
+  });
+});
+
+describe('hasMissedAnagram', () => {
+  function pool({ loose = [], words = [] }) {
+    return {
+      faceDown: [],
+      looseLetters: loose,
+      words: words.map((w) => ({ word: w, parents: [] })),
+    };
+  }
+
+  it('returns "loose" when a 3+ letter word exists in the loose pool only', () => {
+    expect(hasMissedAnagram(pool({ loose: ['c', 'a', 't'] }), dict)).toBe('loose');
+  });
+
+  it('returns "steal" when a single-parent steal is available (rook + b -> brook)', () => {
+    expect(
+      hasMissedAnagram(pool({ loose: ['b'], words: ['rook'] }), dict),
+    ).toBe('steal');
+  });
+
+  it('returns null when no play exists', () => {
+    expect(
+      hasMissedAnagram(pool({ loose: ['x', 'q', 'z'], words: [] }), dict),
+    ).toBeNull();
+  });
+
+  it('does not flag a trivial-inflection-only steal (pod + s -> pods)', () => {
+    expect(
+      hasMissedAnagram(pool({ loose: ['s'], words: ['pod'] }), dict),
+    ).toBeNull();
+  });
+
+  it('returns "loose" when both a loose-pool word and a steal are available', () => {
+    expect(
+      hasMissedAnagram(
+        pool({ loose: ['c', 'a', 't', 'b'], words: ['rook'] }),
+        dict,
+      ),
+    ).toBe('loose');
+  });
+
+  it('detects a steal that uses more than one loose tile (fin + e + d -> fined)', () => {
+    expect(
+      hasMissedAnagram(pool({ loose: ['e', 'd'], words: ['fin'] }), dict),
+    ).toBe('steal');
   });
 });
 
