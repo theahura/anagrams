@@ -154,3 +154,25 @@ function humanizeTime(ms) {
   }
   return `${m} minute${m === 1 ? '' : 's'} ${s} second${s === 1 ? '' : 's'}`;
 }
+
+export async function shareOrCopy(text) {
+  if (
+    typeof navigator.share === 'function' &&
+    (typeof navigator.canShare !== 'function' ||
+      navigator.canShare({ text }))
+  ) {
+    try {
+      await navigator.share({ text });
+      return 'shared';
+    } catch (err) {
+      if (err && err.name === 'AbortError') return 'cancelled';
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return 'copied';
+  } catch {
+    window.prompt('Copy your result:', text);
+    return 'prompted';
+  }
+}

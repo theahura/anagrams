@@ -744,3 +744,188 @@ describe('HomeScreen day-detail popover — share', () => {
     wrapper.unmount();
   });
 });
+
+describe('HomeScreen day-detail popover — Share button native Web Share path', () => {
+  function buildRecentWithHistory({
+    date,
+    score,
+    longestWord,
+    durationMs,
+    history,
+    todayDate = '2026-04-25',
+  }) {
+    const out = [];
+    const [y, m, d] = todayDate.split('-').map(Number);
+    const todayMs = Date.UTC(y, m - 1, d);
+    for (let i = 6; i >= 0; i--) {
+      const t = todayMs - i * 86400000;
+      const dateStr = new Date(t).toISOString().slice(0, 10);
+      const played = dateStr === date;
+      const entry = { date: dateStr, played };
+      if (played) {
+        entry.record = { score, longestWord, durationMs };
+        if (history !== undefined) entry.record.history = history;
+      }
+      out.push(entry);
+    }
+    return out;
+  }
+
+  function installClipboardMock(writeTextImpl) {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextImpl },
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  function setShare(impl) {
+    Object.defineProperty(navigator, 'share', {
+      value: impl,
+      configurable: true,
+      writable: true,
+    });
+  }
+  function setCanShare(impl) {
+    Object.defineProperty(navigator, 'canShare', {
+      value: impl,
+      configurable: true,
+      writable: true,
+    });
+  }
+  function clearShareApi() {
+    Object.defineProperty(navigator, 'share', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(navigator, 'canShare', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  afterEach(() => {
+    clearShareApi();
+    vi.restoreAllMocks();
+    document.querySelectorAll('[role="dialog"]').forEach((n) => n.remove());
+  });
+
+  it('uses navigator.share when available and does NOT flip "Copied!"', async () => {
+    const shareSpy = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => true);
+    installClipboardMock(writeText);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 52,
+          longestWord: 'refine',
+          durationMs: 60000,
+          history: [{ word: 'fine', parents: [] }],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const shareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) =>
+        b.textContent.trim() === 'Share' || b.textContent.trim() === 'Copied!'
+    );
+    shareBtn.click();
+    await flushPromises();
+
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(shareBtn.textContent.trim()).toBe('Share');
+    wrapper.unmount();
+  });
+
+  it('falls back to clipboard and flips "Copied!" when share rejects with non-Abort error', async () => {
+    const err = Object.assign(new Error('not allowed'), {
+      name: 'NotAllowedError',
+    });
+    const shareSpy = vi.fn().mockRejectedValue(err);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => true);
+    installClipboardMock(writeText);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 99,
+          longestWord: 'banana',
+          durationMs: 60000,
+          history: [{ word: 'banana', parents: [] }],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const shareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) =>
+        b.textContent.trim() === 'Share' || b.textContent.trim() === 'Copied!'
+    );
+    shareBtn.click();
+    await flushPromises();
+
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(shareBtn.textContent.trim()).toBe('Copied!');
+    wrapper.unmount();
+  });
+
+  it('does NOT flip "Copied!" when user cancels the share sheet (AbortError)', async () => {
+    const abortErr = Object.assign(new Error('aborted'), {
+      name: 'AbortError',
+    });
+    const shareSpy = vi.fn().mockRejectedValue(abortErr);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => true);
+    installClipboardMock(writeText);
+
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 1,
+        best: 100,
+        completedToday: false,
+        recent: buildRecentWithHistory({
+          date: '2026-04-22',
+          score: 50,
+          longestWord: 'apple',
+          durationMs: 60000,
+          history: [{ word: 'apple', parents: [] }],
+        }),
+      },
+      attachTo: document.body,
+    });
+    await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
+    const dialog = document.querySelector('[role="dialog"]');
+    const shareBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) =>
+        b.textContent.trim() === 'Share' || b.textContent.trim() === 'Copied!'
+    );
+    shareBtn.click();
+    await flushPromises();
+
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(shareBtn.textContent.trim()).toBe('Share');
+    wrapper.unmount();
+  });
+});

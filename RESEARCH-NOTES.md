@@ -2255,3 +2255,154 @@ The pre-existing test `marks game as ended when face-down was empty`
 - [NYT Spelling Bee — Wikipedia](https://en.wikipedia.org/wiki/The_New_York_Times_Spelling_Bee)
 - [Procreator — Game UI Design Best Practices](https://procreator.design/blog/best-practices-for-game-ui-design/)
 
+## Native Web Share API integration (v18 commit)
+
+### The gap
+
+Both primary "Share" buttons (`ScoreScreen.onShare`,
+`HomeScreen.shareSelectedDay`) call `await
+navigator.clipboard.writeText(text)` directly and flip a 2-second
+"Copied!" label. On mobile (the dominant platform for Wordle-style
+share-and-bait virality) this is a degraded UX: the user sees
+"Copied!" and has to switch apps and paste manually. The native
+Web Share API (`navigator.share({text})`) opens the OS share sheet
+(Messages, Twitter, WhatsApp, …) with one tap. Adopted by NYT
+Wordle, Connections, Spelling Bee, and most modern Wordle clones.
+
+### Browser support (April 2026)
+
+- **Mobile**: full support on Safari iOS, Chrome Android, Edge Android,
+  Samsung Internet. Firefox Android: limited.
+- **Desktop**: Safari macOS yes; Chrome / Edge yes (uses OS sheet on
+  Windows / ChromeOS / macOS); Firefox desktop: behind
+  `dom.webshare.enabled` pref, no rollout plans — treat as unsupported.
+
+`navigator.share` truthy + `navigator.canShare?.({text})` truthy is
+sufficient to gate the call. `canShare()` is primarily designed to
+validate `files`; for plain `{text}` it's a near no-op (returns
+`true` whenever `share` exists). Both checks together is the
+defensive idiom recommended by MDN; using just `navigator.share` is
+also fine for text-only payloads.
+
+### `AbortError` is not "fall through"
+
+Per [web.dev](https://web.dev/articles/web-share): "user cancellation
+isn't an error condition requiring intervention." When the user
+dismisses the OS share sheet, `navigator.share` rejects with
+`DOMException: AbortError`. Falling through to clipboard would be
+hostile UX — the user just *explicitly told the OS they didn't want
+to share.* Treat `AbortError` as a silent no-op and return.
+
+For *other* errors (`NotAllowedError`, `DataError`, malformed
+payload, transient browser failure), fall through to clipboard.
+
+### Permission requirements
+
+- **HTTPS / secure context required** for both `navigator.share` and
+  `navigator.clipboard.writeText`. The `window.prompt` fallback covers
+  HTTP (e.g. `localhost:5173` over HTTP).
+- **Transient user activation required** — must be inside a click /
+  keydown handler. Both Anagrams call sites already are.
+- `web-share` Permissions Policy defaults to `self`; not relevant for
+  a single-page game.
+
+### Implementation shape
+
+```js
+// src/share.js — new exported helper
+export async function shareOrCopy(text) {
+  if (navigator.share && (!navigator.canShare || navigator.canShare({ text }))) {
+    try {
+      await navigator.share({ text });
+      return 'shared';
+    } catch (err) {
+      if (err.name === 'AbortError') return 'cancelled';
+      // any other error: fall through
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return 'copied';
+  } catch {
+    window.prompt('Copy your result:', text);
+    return 'prompted';
+  }
+}
+```
+
+Return-value contract used by call sites to decide UX feedback:
+
+| return value | meaning                          | "Copied!" label? |
+| ------------ | -------------------------------- | ---------------- |
+| `'shared'`   | Native sheet completed           | No (OS gave its own confirmation) |
+| `'cancelled'`| User dismissed the sheet         | No (user said no) |
+| `'copied'`   | Clipboard write succeeded        | Yes (2s flash)    |
+| `'prompted'` | Fell back to `window.prompt`     | No (modal already gave feedback) |
+
+### Test mocking patterns (Vitest + happy-dom)
+
+happy-dom defines `navigator` properties as non-configurable getters
+on some versions. Direct assignment silently fails; use
+`Object.defineProperty(navigator, 'share', { value: vi.fn(),
+configurable: true, writable: true })`. To simulate the no-share-API
+path, `Object.defineProperty(navigator, 'share', { value: undefined,
+configurable: true })` (or `delete navigator.share` once
+`configurable: true` was set previously).
+
+For `navigator.clipboard`, mocking the whole `clipboard` object as a
+single property is more portable than redefining `writeText` alone:
+
+```js
+Object.defineProperty(navigator, 'clipboard', {
+  value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  configurable: true,
+});
+```
+
+Simulating `AbortError` (`DOMException` subclass): the named-error
+trick is more portable than `new DOMException(...)`:
+
+```js
+const err = Object.assign(new Error('aborted'), { name: 'AbortError' });
+shareSpy.mockRejectedValue(err);
+```
+
+### Scope decisions
+
+- **Apply to primary "Share" buttons only** (ScoreScreen `onShare`,
+  HomeScreen `shareSelectedDay`). The "Copy alt text" buttons stay
+  clipboard-only — they're labeled "Copy", different UX intent
+  (export-to-personal-paste, not share-externally).
+- **No new dependencies.** `shareOrCopy` is ~15 LOC, no library
+  needed.
+- **No `<button>` text change.** "Share" still says "Share". On
+  mobile it now opens the share sheet; on desktop without
+  `navigator.share` it copies; on legacy / locked-down browsers it
+  prompts. The label is platform-agnostic.
+- **No optimistic UI.** Don't flip "Copied!" before the await
+  resolves — if the user picks a target in the share sheet, "Copied!"
+  is wrong; if they cancel, "Copied!" is wrong. Wait for the return
+  value.
+- **No fallback chain config / customization.** The helper is private
+  to `share.js`; no need to expose the order, logic, or per-call-site
+  behavior tweaks.
+
+### Out of scope
+
+- Web Share Level 2 (`files: [...]`) — text-only here.
+- Sharing alt-text via Web Share — the alt-text button is
+  clipboard-only by design (see above).
+- A custom in-app share menu / fan-out to specific platforms
+  (Twitter, Facebook, etc.) — Web Share already routes through the
+  user's installed apps.
+
+### Sources
+
+- [MDN: Navigator.share()](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share)
+- [MDN: Navigator.canShare()](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/canShare)
+- [MDN: Clipboard.writeText()](https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText)
+- [web.dev — Web Share API](https://web.dev/articles/web-share)
+- [caniuse — Navigator.share](https://caniuse.com/?search=Navigator+share)
+- [Vitest issue #8519 — Cannot redefine property](https://github.com/vitest-dev/vitest/issues/8519)
+- [Raymond Camden — Testing the Web Share API](https://www.raymondcamden.com/2023/04/20/testing-the-web-share-api)
+

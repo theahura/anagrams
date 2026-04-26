@@ -1,6 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { generateShareText, generateShareAltText } from '../share.js';
+import {
+  generateShareText,
+  generateShareAltText,
+  shareOrCopy,
+} from '../share.js';
 
 const props = defineProps({
   loading: { type: Boolean, default: false },
@@ -57,17 +61,14 @@ async function shareSelectedDay() {
   const entry = selectedEntry.value;
   if (!entry?.record) return;
   const text = generateShareText(buildSelectedShareArgs(entry));
-  try {
-    await navigator.clipboard.writeText(text);
-    if (selectedIndex.value !== startedFor) return;
+  const outcome = await shareOrCopy(text);
+  if (selectedIndex.value !== startedFor) return;
+  if (outcome === 'copied') {
     copiedDay.value = true;
     if (copiedTimer) clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => {
       copiedDay.value = false;
     }, 2000);
-  } catch {
-    if (selectedIndex.value !== startedFor) return;
-    window.prompt('Copy your result:', text);
   }
 }
 

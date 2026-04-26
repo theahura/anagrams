@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { generateShareText, generateShareAltText } from '../src/share.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import {
+  generateShareText,
+  generateShareAltText,
+  shareOrCopy,
+} from '../src/share.js';
 
 describe('generateShareText — daily mode', () => {
   it('includes the date and final score', () => {
@@ -707,3 +711,157 @@ describe('generateShareAltText', () => {
   });
 
 });
+
+describe('shareOrCopy', () => {
+  function setShare(impl) {
+    Object.defineProperty(navigator, 'share', {
+      value: impl,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  function setCanShare(impl) {
+    Object.defineProperty(navigator, 'canShare', {
+      value: impl,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  function setClipboard(writeText) {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  function clearShareApi() {
+    Object.defineProperty(navigator, 'share', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(navigator, 'canShare', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  afterEach(() => {
+    clearShareApi();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('returns "shared" and does not call clipboard when navigator.share resolves', async () => {
+    const shareSpy = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => true);
+    setClipboard(writeText);
+
+    const result = await shareOrCopy('hello world');
+
+    expect(result).toBe('shared');
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('returns "cancelled" without falling through to clipboard when share rejects with AbortError', async () => {
+    const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const shareSpy = vi.fn().mockRejectedValue(abortErr);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => true);
+    setClipboard(writeText);
+
+    const result = await shareOrCopy('hello world');
+
+    expect(result).toBe('cancelled');
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('falls back to clipboard on a non-Abort share rejection', async () => {
+    const otherErr = Object.assign(new Error('not allowed'), {
+      name: 'NotAllowedError',
+    });
+    const shareSpy = vi.fn().mockRejectedValue(otherErr);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => true);
+    setClipboard(writeText);
+
+    const result = await shareOrCopy('hello world');
+
+    expect(result).toBe('copied');
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith('hello world');
+  });
+
+  it('uses clipboard directly when navigator.share is undefined', async () => {
+    clearShareApi();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard(writeText);
+
+    const result = await shareOrCopy('foo bar');
+
+    expect(result).toBe('copied');
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith('foo bar');
+  });
+
+  it('uses navigator.share when it is defined and canShare is undefined', async () => {
+    const shareSpy = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    Object.defineProperty(navigator, 'canShare', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard(writeText);
+
+    const result = await shareOrCopy('text');
+
+    expect(result).toBe('shared');
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('skips share path and uses clipboard when canShare returns false', async () => {
+    const shareSpy = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setShare(shareSpy);
+    setCanShare(() => false);
+    setClipboard(writeText);
+
+    const result = await shareOrCopy('text');
+
+    expect(result).toBe('copied');
+    expect(shareSpy).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to window.prompt when share is absent and clipboard rejects', async () => {
+    clearShareApi();
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    setClipboard(writeText);
+    const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => null);
+
+    const result = await shareOrCopy('payload');
+
+    expect(result).toBe('prompted');
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(promptSpy.mock.calls[0][1]).toBe('payload');
+  });
+});
+

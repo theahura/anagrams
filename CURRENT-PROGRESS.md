@@ -1536,6 +1536,176 @@ in RESEARCH-NOTES.md "Allow play after the final draw (v17 commit)".
   kB raw / −0.01 kB gzipped from removing the `isFaceDownEmpty`
   import call site). CSS unchanged at 9.34 kB.
 
+### `feat/initial-game` — Native Web Share API on the primary Share buttons (this commit)
+
+Closes the unmentioned mobile UX gap noted while reviewing the spec
+for further work. Both primary "Share" surfaces (`ScoreScreen.onShare`
+and the `HomeScreen` day-detail popover's `shareSelectedDay`)
+previously called `navigator.clipboard.writeText` directly and showed
+a 2-second `Copied!` flash. On mobile (the dominant Wordle-share
+platform) this was a degraded UX: users saw `Copied!`, switched apps,
+and pasted manually. After this commit, both buttons dispatch through
+a shared `shareOrCopy(text)` helper that prefers the OS share sheet
+(`navigator.share({text})` — Messages, Twitter, WhatsApp, …) and
+falls back to clipboard, then `window.prompt`. Pure additive change:
+`generateShareText` / `generateShareAltText` signatures unchanged,
+share-text format unchanged, no domain modules, no CSS, no new
+dependencies, no `SCHEMA_VERSION` bump.
+
+#### What changed
+- `src/share.js` — new exported async helper
+  `shareOrCopy(text)` (~20 LOC). Returns one of four discriminant
+  strings: `'shared'` (`navigator.share` resolved), `'cancelled'`
+  (`AbortError` — user dismissed the OS share sheet),
+  `'copied'` (clipboard write resolved), `'prompted'`
+  (`window.prompt` fell through). Dispatch order: try
+  `navigator.share` only when it's a function *and* either
+  `navigator.canShare` is missing or `navigator.canShare({text})`
+  is `true`; on `AbortError`, return `'cancelled'` without falling
+  through (web.dev canonical pattern: user-cancellation isn't an
+  error condition); on any other share rejection, fall through to
+  clipboard; on clipboard rejection, fall through to
+  `window.prompt('Copy your result:', text)`.
+- `src/components/ScoreScreen.vue` — `onShare` rewritten to await
+  `shareOrCopy(text)` and only flip the `copied` ref to
+  `Copied!` when the helper returns `'copied'`. The other three
+  return values leave the button label untouched (the OS share
+  sheet, user-cancellation, and the prompt modal each surface
+  their own user feedback). `onCopyAltText` (the "Copy alt text"
+  button) intentionally NOT changed — stays clipboard-only by
+  design (different UX intent: export-to-personal-paste, not
+  share-externally).
+- `src/components/HomeScreen.vue` — `shareSelectedDay` rewritten
+  to await `shareOrCopy(text)` with the same `'copied'`-only
+  flip semantics. The pre-existing v12 race-guard pattern is
+  preserved verbatim: `startedFor = selectedIndex.value` is
+  captured before the await, and on the post-await branch
+  `selectedIndex.value !== startedFor` returns early before
+  flipping any flag. `copyAltSelectedDay` (the alt-text button)
+  intentionally NOT changed — same alt-text design rationale.
+
+#### What did NOT change
+- No template / CSS changes — the buttons keep their existing
+  `.action-btn` / `.day-popover-share` classes and labels (`Share`
+  → `Copied!` flip stays the only label change; `Share` → `Share`
+  for the OS-sheet and AbortError paths).
+- No new dependencies. No `web-share` library. The helper is ~20
+  LOC, no abstraction needed.
+- No domain-module changes (`src/game.js`, `src/scoring.js`,
+  `src/pool.js`, `src/anagramRules.js`, `src/dictionary.js`,
+  `src/staging.js`, `src/storage.js`, `src/trivialInflection.js`,
+  `src/dateKey.js`, `src/tiles.js`, `src/prng.js`,
+  `src/multiset.js` are untouched).
+- No `generateShareText` / `generateShareAltText` signature
+  changes. No share-text format change.
+- No optimistic UI. `shareOrCopy` awaits the share / clipboard
+  promise before reporting the outcome — flipping `Copied!`
+  before the await would be wrong if the user picks a target in
+  the share sheet (sheet completed, not clipboard) or cancels
+  (no share happened).
+- No `SCHEMA_VERSION` bump. No persisted-storage shape change.
+
+#### A11y / UX rationale (researched against industry sources)
+- **`AbortError` is not "fall through to clipboard"**. Per
+  [web.dev Web Share recipe](https://web.dev/articles/web-share):
+  "user cancellation isn't an error condition requiring
+  intervention." Falling through to clipboard would silently copy
+  text the user just declined to share — hostile UX. Test #2
+  in `describe('shareOrCopy', …)` locks this invariant.
+- **Browser support (April 2026):** full mobile (Safari iOS,
+  Chrome Android, Edge Android, Samsung Internet). Desktop:
+  Safari macOS yes, Chrome / Edge desktop yes (uses OS sheet on
+  Windows / ChromeOS / macOS), Firefox desktop unsupported
+  (clipboard fallback handles it). The single 3-tier fallback
+  chain works across all of these.
+- **HTTPS + transient user activation required** for both
+  `navigator.share` and `navigator.clipboard.writeText`. Both
+  call sites already are inside click handlers; the
+  `window.prompt` fallback covers HTTP-only scenarios.
+
+#### Tests added
+- `tests/share.test.js` — new `describe('shareOrCopy', …)` block,
+  7 tests asserting on the helper's return value (the public
+  contract) plus the externally-observable side effects:
+  - "returns 'shared' and does not call clipboard when
+    navigator.share resolves".
+  - "returns 'cancelled' without falling through to clipboard
+    when share rejects with AbortError" (locks the canonical-UX
+    invariant; clipboard NOT called).
+  - "falls back to clipboard on a non-Abort share rejection"
+    (NotAllowedError → clipboard called once with the original
+    text).
+  - "uses clipboard directly when navigator.share is undefined".
+  - "uses navigator.share when it is defined and canShare is
+    undefined" (locks the `typeof canShare !== 'function'`
+    branch — older Safari / lockdown variants).
+  - "skips share path and uses clipboard when canShare returns
+    false" (locks the gating; share NOT called).
+  - "falls back to window.prompt when share is absent and
+    clipboard rejects" (prompt receives the original text).
+- `tests/scoreScreen.test.js` — new `describe('ScoreScreen — Share
+  button native Web Share path', …)` block, 3 tests asserting on
+  DOM-visible button-label behaviour:
+  - "uses navigator.share when available and does NOT flip
+    'Copied!'" (`Share` stays `Share`; clipboard NOT called).
+  - "falls back to clipboard and flips 'Copied!' when share
+    rejects with non-Abort error" (`Share` → `Copied!`;
+    clipboard called once).
+  - "does NOT flip 'Copied!' when user cancels the share sheet
+    (AbortError)" (`Share` stays `Share`; clipboard NOT called).
+- `tests/homeScreen.test.js` — new `describe('HomeScreen
+  day-detail popover — Share button native Web Share path', …)`
+  block, 3 tests covering the same three scenarios for the
+  popover Share button. All operate against the rendered
+  `[role="dialog"]` panel via the same Teleport pattern used
+  elsewhere.
+- All pre-existing share / ScoreScreen / HomeScreen tests
+  (clipboard-only path, alt-text buttons, popover dismiss
+  invariants, race guard) untouched and still passing — their
+  `afterEach` blocks now also delete `navigator.share` /
+  `navigator.canShare` so the existing assertions still
+  exercise the clipboard fallback.
+
+#### Documentation
+- `src/docs.md` — Core Implementation gains a "Share dispatch
+  helper — `shareOrCopy`" bullet documenting the four return
+  values, dispatch order, and AbortError short-circuit. Two new
+  Things-to-Know entries: "AbortError is treated as a successful
+  no-op, not as fall-through" (rationale + test cross-link) and
+  "Alt-text share buttons stay clipboard-only by design"
+  (export-to-personal-paste vs share-externally distinction).
+- `src/components/docs.md` — "Share surfaces — dual buttons"
+  cross-component invariant extended to make explicit that the
+  primary Share button on both surfaces dispatches through
+  `shareOrCopy`, while the secondary Copy alt text stays
+  clipboard-only. ScoreScreen and HomeScreen popover bullets
+  rewritten to reflect the conditional `'copied'`-only flip
+  semantics on the primary Share path; the alt path documented
+  as the direct clipboard call.
+- `RESEARCH-NOTES.md` — appended a "Native Web Share API
+  integration (v18 commit)" section with the gap, browser
+  support matrix, AbortError rationale, permission requirements,
+  the implementation shape, the return-value-to-UX-feedback
+  table, test mocking patterns for `navigator.share` /
+  `navigator.canShare` / `navigator.clipboard` under
+  Vitest+happy-dom, scope decisions, out-of-scope items, and
+  source citations.
+
+#### Verified
+- `npm test` — 258/258 passing (was 245; +7 shareOrCopy + 3
+  ScoreScreen + 3 HomeScreen). All pre-existing tests still
+  passing.
+- `npm run build` — production bundle builds cleanly in 0.63 s.
+  CSS unchanged at 9.34 kB. JS at 106.45 kB raw / 40.74 kB
+  gzipped (was 106.22 kB / 40.60 kB; +0.23 kB raw / +0.14 kB
+  gzipped for the new exported helper plus two simplified call
+  sites).
+- End-to-end native-share UX (OS sheet on iOS / Android,
+  AbortError dismissal, clipboard fallback on Firefox desktop)
+  is verifiable manually but not driven from CLI; the test
+  suite covers the dispatch logic and the per-button UI
+  feedback at the component-DOM level.
+
 ## Open follow-ups (next commits)
 
 - Score-tier color heatmap on calendar cells (currently boolean

@@ -1,6 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { generateShareText, generateShareAltText } from '../share.js';
+import {
+  generateShareText,
+  generateShareAltText,
+  shareOrCopy,
+} from '../share.js';
 
 const props = defineProps({
   result: { type: Object, required: true },
@@ -33,12 +37,10 @@ function buildShareArgs() {
 
 async function onShare() {
   const text = generateShareText(buildShareArgs());
-  try {
-    await navigator.clipboard.writeText(text);
+  const outcome = await shareOrCopy(text);
+  if (outcome === 'copied') {
     copied.value = true;
     setTimeout(() => (copied.value = false), 2000);
-  } catch {
-    window.prompt('Copy your result:', text);
   }
 }
 
