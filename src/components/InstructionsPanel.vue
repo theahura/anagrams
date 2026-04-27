@@ -72,6 +72,7 @@ onBeforeUnmount(() => {
           <li>Long words score more.</li>
           <li>Drawing when an obvious word is on the board costs you points.</li>
           <li>Anagrams must <strong>rearrange</strong> letters — no trivial inflections.</li>
+          <li>A <strong>ghost</strong> watches the board and will snatch your words every now and then — steal them back to keep them.</li>
         </ul>
 
         <p class="instructions-hint">

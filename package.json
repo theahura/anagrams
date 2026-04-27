@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build-dict": "node scripts/build-dict.js",
-    "build-lemmas": "node scripts/build-lemmas.js"
+    "build-lemmas": "node scripts/build-lemmas.js",
+    "build-common": "node scripts/build-common.js"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.5",

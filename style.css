@@ -197,6 +197,14 @@ button.word-row {
   border-color: #538d4e;
 }
 
+.word-row.ghost-word {
+  opacity: 0.65;
+}
+
+.word-row.ghost-word .tile {
+  border-style: dashed;
+}
+
 /* === Game info bar === */
 .game-info {
   display: flex;

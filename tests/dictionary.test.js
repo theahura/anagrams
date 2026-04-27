@@ -45,4 +45,32 @@ describe('loadDictionary', () => {
     expect(matches).toContain('eat');
     expect(matches).toContain('tea');
   });
+
+  it('isCommonWord returns false for every word when no commonJson is supplied', () => {
+    expect(dict.isCommonWord('cat')).toBe(false);
+    expect(dict.isCommonWord('hello')).toBe(false);
+  });
+});
+
+describe('loadDictionary with common-word list', () => {
+  it('isCommonWord returns true only for words present in the common list', () => {
+    const dictWithCommon = loadDictionary(
+      { words: ['cat', 'aardvark', 'hello'] },
+      { schemaVersion: 1, lemmas: {} },
+      { schemaVersion: 1, words: ['cat', 'hello'] }
+    );
+    expect(dictWithCommon.isCommonWord('cat')).toBe(true);
+    expect(dictWithCommon.isCommonWord('hello')).toBe(true);
+    expect(dictWithCommon.isCommonWord('aardvark')).toBe(false);
+  });
+
+  it('isCommonWord is case-insensitive', () => {
+    const dictWithCommon = loadDictionary(
+      { words: ['cat'] },
+      { schemaVersion: 1, lemmas: {} },
+      { schemaVersion: 1, words: ['cat'] }
+    );
+    expect(dictWithCommon.isCommonWord('CAT')).toBe(true);
+    expect(dictWithCommon.isCommonWord('Cat')).toBe(true);
+  });
 });

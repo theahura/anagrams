@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { drawTile, submitWord, endGame } from '../game.js';
 import { finalScore, hasMissedAnagram } from '../scoring.js';
 import { highlightConsumption } from '../staging.js';
+import { startGhost } from '../ghost.js';
 import InstructionsPanel from './InstructionsPanel.vue';
 
 const props = defineProps({
@@ -20,6 +21,7 @@ const helpBtnRef = ref(null);
 const showInstructions = ref(true);
 let instructionsOpenedByHelp = false;
 let timerHandle = null;
+let ghostHandle = null;
 
 const typed = computed({
   get: () => trail.value.map((e) => e.letter).join(''),
@@ -66,6 +68,12 @@ const score = computed(() =>
 
 const looseLetters = computed(() => game.value.pool.looseLetters);
 const playerWords = computed(() => game.value.pool.words);
+const ghostWords = computed(() =>
+  game.value.pool.words.filter((w) => w.owner === 'ghost')
+);
+const hasHumanWords = computed(() =>
+  playerWords.value.some((w) => w.owner !== 'ghost')
+);
 const faceDownCount = computed(() => game.value.pool.faceDown.length);
 const canDraw = computed(() => faceDownCount.value > 0);
 
@@ -162,10 +170,23 @@ onMounted(() => {
   tick();
   timerHandle = setInterval(tick, 1000);
   document.addEventListener('keydown', onDocKeydown);
+  if (game.value.ghostRng) {
+    ghostHandle = startGhost({
+      getGame: () => game.value,
+      dict: props.dict,
+      random: game.value.ghostRng,
+      onSteal: (newPool) => {
+        game.value = { ...game.value, pool: newPool };
+        trail.value = [];
+        clearFeedback();
+      },
+    });
+  }
 });
 
 onUnmounted(() => {
   if (timerHandle) clearInterval(timerHandle);
+  if (ghostHandle) ghostHandle.stop();
   document.removeEventListener('keydown', onDocKeydown);
 });
 
@@ -230,6 +251,10 @@ function onEndGame() {
 
 function finishGame() {
   if (timerHandle) clearInterval(timerHandle);
+  if (ghostHandle) {
+    ghostHandle.stop();
+    ghostHandle = null;
+  }
   const result = endGame(game.value, Date.now());
   emit('end', result);
 }
@@ -298,19 +323,34 @@ function formatTime(ms) {
 
     <div class="section-label">Your words</div>
     <div class="words-list">
-      <div v-if="playerWords.length === 0" class="empty-note">No words yet.</div>
-      <button
-        v-for="(w, i) in playerWords"
-        :key="`w${i}`"
-        type="button"
-        :class="['word-row', 'clickable', { consumed: consumption.words.has(i) }]"
-        :aria-label="wordLabel(w, i)"
-        @mousedown.prevent
-        @click="onWordClick(i)"
-      >
-        <span v-for="(ch, j) in w.word.split('')" :key="`c${j}`" class="tile" aria-hidden="true">{{ ch }}</span>
-      </button>
+      <div v-if="!hasHumanWords" class="empty-note">No words yet.</div>
+      <template v-for="(w, i) in playerWords" :key="`w${i}`">
+        <button
+          v-if="w.owner !== 'ghost'"
+          type="button"
+          :class="['word-row', 'clickable', { consumed: consumption.words.has(i) }]"
+          :aria-label="wordLabel(w, i)"
+          @mousedown.prevent
+          @click="onWordClick(i)"
+        >
+          <span v-for="(ch, j) in w.word.split('')" :key="`c${j}`" class="tile" aria-hidden="true">{{ ch }}</span>
+        </button>
+      </template>
     </div>
+
+    <template v-if="ghostWords.length > 0">
+      <div class="section-label">Ghost's words</div>
+      <div class="words-list" data-testid="ghost-words">
+        <div
+          v-for="(w, i) in ghostWords"
+          :key="`g${i}`"
+          class="word-row ghost-word"
+          :aria-label="`Ghost word ${w.word}, ${w.word.length} letters`"
+        >
+          <span v-for="(ch, j) in w.word.split('')" :key="`gc${j}`" class="tile" aria-hidden="true">{{ ch }}</span>
+        </div>
+      </div>
+    </template>
 
     <form class="word-input" @submit.prevent="onSubmit">
       <label for="word-input-field" class="sr-only">Type a word</label>
