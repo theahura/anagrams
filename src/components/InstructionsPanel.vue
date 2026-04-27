@@ -69,8 +69,6 @@ onBeforeUnmount(() => {
 
         <ul>
           <li>A new puzzle every day.</li>
-          <li>Long words score more.</li>
-          <li>Drawing when an obvious word is on the board costs you points.</li>
           <li>Anagrams must <strong>rearrange</strong> letters — no trivial inflections.</li>
         </ul>
 

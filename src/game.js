@@ -2,7 +2,6 @@ import { createTileSet, shuffleTiles } from './tiles.js';
 import { getDailyRng, getRandomRng } from './prng.js';
 import { createPool, drawTile as poolDraw, formWord } from './pool.js';
 import { canFormWord } from './anagramRules.js';
-import { hasMissedAnagram, finalScore } from './scoring.js';
 
 const INITIAL_REVEAL = 3;
 
@@ -18,14 +17,12 @@ export function createGame({ mode, date }, dict) {
     date: mode === 'daily' ? date : null,
     pool,
     history: [],
-    missedDrawCount: 0,
     ended: false,
     startTime: Date.now(),
   };
 }
 
 export function drawTile(game, dict) {
-  const hadAnagram = hasMissedAnagram(game.pool, dict) !== null;
   const next = poolDraw(game.pool);
   if (next === null) {
     return { ...game, ended: true };
@@ -33,7 +30,6 @@ export function drawTile(game, dict) {
   return {
     ...game,
     pool: next,
-    missedDrawCount: game.missedDrawCount + (hadAnagram ? 1 : 0),
     ended: false,
   };
 }
@@ -62,10 +58,6 @@ export function submitWord(game, typed, dict) {
 
 export function endGame(game, nowMs) {
   const history = game.history || [];
-  const score = finalScore({
-    words: history,
-    missedDrawCount: game.missedDrawCount,
-  });
   const longest = history.reduce(
     (acc, w) => (w.word.length > acc.length ? w.word : acc),
     ''
@@ -73,11 +65,9 @@ export function endGame(game, nowMs) {
   const longestChain = buildChain(longest, history);
   const totalTimeMs = Math.max(0, (nowMs ?? Date.now()) - game.startTime);
   return {
-    score,
     longestWord: longest,
     longestChain,
     totalTimeMs,
-    missedDrawCount: game.missedDrawCount,
     words: game.pool.words.map((w) => w.word),
     history,
   };

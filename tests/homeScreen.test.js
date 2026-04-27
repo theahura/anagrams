@@ -12,19 +12,49 @@ function buildRecent({ playedDates = [], todayDate = '2026-04-25', count = 7 }) 
     const played = playedDates.includes(date);
     const entry = { date, played };
     if (played) {
-      entry.record = { score: 100 + i, longestWord: 'word', durationMs: 60000 };
+      entry.record = { longestWord: 'word', durationMs: 60000 };
     }
     out.push(entry);
   }
   return out;
 }
 
-describe('HomeScreen calendar strip', () => {
-  it('does not render the calendar when streak and best are both zero', () => {
+describe('HomeScreen home stats row', () => {
+  it('does not render the home stats row when streak is zero', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 0,
-        best: 0,
+        completedToday: false,
+        recent: buildRecent({}),
+      },
+    });
+    expect(wrapper.find('.home-stats').exists()).toBe(false);
+  });
+
+  it('renders the streak when streak > 0 and does not render any best score', () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 3,
+        completedToday: true,
+        recent: buildRecent({
+          playedDates: ['2026-04-23', '2026-04-24', '2026-04-25'],
+          todayDate: '2026-04-25',
+        }),
+      },
+    });
+    expect(wrapper.find('.home-stats').exists()).toBe(true);
+    const text = wrapper.find('.home-stats').text();
+    expect(text).toMatch(/Streak/);
+    expect(text).toContain('3');
+    expect(text).not.toMatch(/Best/i);
+  });
+});
+
+describe('HomeScreen calendar strip', () => {
+  it('does not render the calendar when streak is zero', () => {
+    const wrapper = mount(HomeScreen, {
+      props: {
+        streak: 0,
         completedToday: false,
         recent: buildRecent({}),
       },
@@ -36,7 +66,6 @@ describe('HomeScreen calendar strip', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 2,
-        best: 120,
         completedToday: true,
         recent: buildRecent({
           playedDates: ['2026-04-24', '2026-04-25'],
@@ -52,7 +81,6 @@ describe('HomeScreen calendar strip', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 50,
         completedToday: false,
         recent: buildRecent({
           playedDates: ['2026-04-24'],
@@ -71,7 +99,6 @@ describe('HomeScreen calendar strip', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 2,
-        best: 120,
         completedToday: false,
         recent: buildRecent({
           playedDates: ['2026-04-22', '2026-04-24'],
@@ -86,11 +113,10 @@ describe('HomeScreen calendar strip', () => {
     expect(cells[6].classes()).not.toContain('played');
   });
 
-  it('gives every cell an aria-label that reflects state', () => {
+  it('gives every cell an aria-label that reflects state and contains no score number', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 142,
         completedToday: true,
         recent: buildRecent({
           playedDates: ['2026-04-22', '2026-04-25'],
@@ -103,11 +129,12 @@ describe('HomeScreen calendar strip', () => {
       const label = cell.attributes('aria-label');
       expect(label).toBeTruthy();
       expect(label.length).toBeGreaterThan(0);
+      expect(label).not.toMatch(/score/i);
     }
     const todayLabel = cells[6].attributes('aria-label');
     expect(todayLabel.startsWith('Today')).toBe(true);
     const playedNonTodayLabel = cells[3].attributes('aria-label');
-    expect(playedNonTodayLabel).toMatch(/Score/);
+    expect(playedNonTodayLabel).toMatch(/Played/);
     const unplayedLabel = cells[0].attributes('aria-label');
     expect(unplayedLabel).toMatch(/Not played/);
   });
@@ -116,7 +143,6 @@ describe('HomeScreen calendar strip', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 50,
         completedToday: true,
         recent: buildRecent({
           playedDates: ['2026-04-25'],
@@ -132,7 +158,7 @@ describe('HomeScreen calendar strip', () => {
 });
 
 describe('HomeScreen day-detail popover', () => {
-  function buildRecentWithRecord({ date, score, longestWord, durationMs, todayDate = '2026-04-25' }) {
+  function buildRecentWithRecord({ date, longestWord, durationMs, todayDate = '2026-04-25' }) {
     const out = [];
     const [y, m, d] = todayDate.split('-').map(Number);
     const todayMs = Date.UTC(y, m - 1, d);
@@ -141,7 +167,7 @@ describe('HomeScreen day-detail popover', () => {
       const dateStr = new Date(t).toISOString().slice(0, 10);
       const played = dateStr === date;
       const entry = { date: dateStr, played };
-      if (played) entry.record = { score, longestWord, durationMs };
+      if (played) entry.record = { longestWord, durationMs };
       out.push(entry);
     }
     return out;
@@ -150,11 +176,9 @@ describe('HomeScreen day-detail popover', () => {
   function defaultProps() {
     return {
       streak: 1,
-      best: 142,
       completedToday: false,
       recent: buildRecentWithRecord({
         date: '2026-04-22',
-        score: 142,
         longestWord: 'redefine',
         durationMs: 305000,
       }),
@@ -190,14 +214,14 @@ describe('HomeScreen day-detail popover', () => {
     wrapper.unmount();
   });
 
-  it('shows the day score, longest word, and duration in the popover', async () => {
+  it('shows the longest word and duration in the popover but no Score row', async () => {
     const wrapper = mount(HomeScreen, { props: defaultProps(), attachTo: document.body });
     await wrapper.findAll('.home-calendar-cell')[3].trigger('click');
     const dialog = document.querySelector('[role="dialog"]');
     const text = dialog.textContent;
-    expect(text).toContain('142');
     expect(text).toContain('redefine');
     expect(text).toMatch(/5:05/);
+    expect(text).not.toMatch(/Score/);
     wrapper.unmount();
   });
 
@@ -278,16 +302,16 @@ describe('HomeScreen day-detail popover', () => {
       const entry = { date: dateStr, played: false };
       if (dateStr === '2026-04-22') {
         entry.played = true;
-        entry.record = { score: 50, longestWord: 'apple', durationMs: 120000 };
+        entry.record = { longestWord: 'apple', durationMs: 120000 };
       }
       if (dateStr === '2026-04-24') {
         entry.played = true;
-        entry.record = { score: 99, longestWord: 'banana', durationMs: 60000 };
+        entry.record = { longestWord: 'banana', durationMs: 60000 };
       }
       recent.push(entry);
     }
     const wrapper = mount(HomeScreen, {
-      props: { streak: 2, best: 99, completedToday: false, recent },
+      props: { streak: 2, completedToday: false, recent },
       attachTo: document.body,
     });
     const cells = wrapper.findAll('.home-calendar-cell');
@@ -305,7 +329,6 @@ describe('HomeScreen day-detail popover', () => {
 describe('HomeScreen day-detail popover — share', () => {
   function buildRecentWithHistory({
     date,
-    score,
     longestWord,
     durationMs,
     history,
@@ -320,7 +343,7 @@ describe('HomeScreen day-detail popover — share', () => {
       const played = dateStr === date;
       const entry = { date: dateStr, played };
       if (played) {
-        entry.record = { score, longestWord, durationMs };
+        entry.record = { longestWord, durationMs };
         if (history !== undefined) entry.record.history = history;
       }
       out.push(entry);
@@ -345,11 +368,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 52,
           longestWord: 'refine',
           durationMs: 60000,
           history: [
@@ -373,11 +394,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 100,
           longestWord: 'word',
           durationMs: 60000,
         }),
@@ -397,11 +416,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 30,
           longestWord: 'foo',
           durationMs: 60000,
           history: [],
@@ -418,18 +435,16 @@ describe('HomeScreen day-detail popover — share', () => {
     wrapper.unmount();
   });
 
-  it('clicking Share copies a Wordle-style share grid containing the date and score', async () => {
+  it('clicking Share copies a Wordle-style share grid containing the date and emoji', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     installClipboardMock(writeText);
 
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 52,
           longestWord: 'refine',
           durationMs: 60000,
           history: [
@@ -451,7 +466,6 @@ describe('HomeScreen day-detail popover — share', () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     const text = writeText.mock.calls[0][0];
     expect(text).toContain('2026-04-22');
-    expect(text).toContain('52');
     expect(text).toMatch(/[\u{1F7E9}\u{1F7E8}]/u);
     wrapper.unmount();
   });
@@ -468,7 +482,6 @@ describe('HomeScreen day-detail popover — share', () => {
       if (dateStr === '2026-04-22') {
         entry.played = true;
         entry.record = {
-          score: 50,
           longestWord: 'apple',
           durationMs: 120000,
           history: [{ word: 'apple', parents: [] }],
@@ -477,7 +490,6 @@ describe('HomeScreen day-detail popover — share', () => {
       if (dateStr === '2026-04-24') {
         entry.played = true;
         entry.record = {
-          score: 99,
           longestWord: 'banana',
           durationMs: 60000,
           history: [{ word: 'banana', parents: [] }],
@@ -486,7 +498,7 @@ describe('HomeScreen day-detail popover — share', () => {
       recent.push(entry);
     }
     const wrapper = mount(HomeScreen, {
-      props: { streak: 2, best: 99, completedToday: false, recent },
+      props: { streak: 2, completedToday: false, recent },
       attachTo: document.body,
     });
     const cells = wrapper.findAll('.home-calendar-cell');
@@ -515,11 +527,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 99,
           longestWord: 'banana',
           durationMs: 60000,
           history: [{ word: 'banana', parents: [] }],
@@ -537,7 +547,7 @@ describe('HomeScreen day-detail popover — share', () => {
 
     expect(promptSpy).toHaveBeenCalledTimes(1);
     const promptText = promptSpy.mock.calls[0][1];
-    expect(promptText).toContain('99');
+    expect(promptText).toContain('2026-04-22');
     wrapper.unmount();
   });
 
@@ -545,11 +555,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 52,
           longestWord: 'refine',
           durationMs: 60000,
           history: [
@@ -572,11 +580,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 100,
           longestWord: 'word',
           durationMs: 60000,
         }),
@@ -595,11 +601,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 30,
           longestWord: 'foo',
           durationMs: 60000,
           history: [],
@@ -615,18 +619,16 @@ describe('HomeScreen day-detail popover — share', () => {
     wrapper.unmount();
   });
 
-  it('clicking Copy alt text copies a plaintext narrative containing the date words and score, no emoji', async () => {
+  it('clicking Copy alt text copies a plaintext narrative containing the date words and Word 1, no emoji', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     installClipboardMock(writeText);
 
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 52,
           longestWord: 'refine',
           durationMs: 60000,
           history: [
@@ -647,7 +649,6 @@ describe('HomeScreen day-detail popover — share', () => {
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const text = writeText.mock.calls[0][0];
-    expect(text).toContain('52');
     expect(text).toContain('April 22 2026');
     expect(text).toContain('Word 1:');
     expect(text).not.toMatch(/[\u{1F7E8}-\u{1F7E9}]/u);
@@ -661,11 +662,9 @@ describe('HomeScreen day-detail popover — share', () => {
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 99,
           longestWord: 'banana',
           durationMs: 60000,
           history: [{ word: 'banana', parents: [] }],
@@ -683,7 +682,6 @@ describe('HomeScreen day-detail popover — share', () => {
 
     expect(promptSpy).toHaveBeenCalledTimes(1);
     const promptText = promptSpy.mock.calls[0][1];
-    expect(promptText).toContain('99');
     expect(promptText).toContain('Word 1:');
     wrapper.unmount();
   });
@@ -700,7 +698,6 @@ describe('HomeScreen day-detail popover — share', () => {
       if (dateStr === '2026-04-22') {
         entry.played = true;
         entry.record = {
-          score: 50,
           longestWord: 'apple',
           durationMs: 120000,
           history: [{ word: 'apple', parents: [] }],
@@ -709,7 +706,6 @@ describe('HomeScreen day-detail popover — share', () => {
       if (dateStr === '2026-04-24') {
         entry.played = true;
         entry.record = {
-          score: 99,
           longestWord: 'banana',
           durationMs: 60000,
           history: [{ word: 'banana', parents: [] }],
@@ -718,7 +714,7 @@ describe('HomeScreen day-detail popover — share', () => {
       recent.push(entry);
     }
     const wrapper = mount(HomeScreen, {
-      props: { streak: 2, best: 99, completedToday: false, recent },
+      props: { streak: 2, completedToday: false, recent },
       attachTo: document.body,
     });
     const cells = wrapper.findAll('.home-calendar-cell');
@@ -748,7 +744,6 @@ describe('HomeScreen day-detail popover — share', () => {
 describe('HomeScreen day-detail popover — Share button native Web Share path', () => {
   function buildRecentWithHistory({
     date,
-    score,
     longestWord,
     durationMs,
     history,
@@ -763,7 +758,7 @@ describe('HomeScreen day-detail popover — Share button native Web Share path',
       const played = dateStr === date;
       const entry = { date: dateStr, played };
       if (played) {
-        entry.record = { score, longestWord, durationMs };
+        entry.record = { longestWord, durationMs };
         if (history !== undefined) entry.record.history = history;
       }
       out.push(entry);
@@ -822,11 +817,9 @@ describe('HomeScreen day-detail popover — Share button native Web Share path',
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 52,
           longestWord: 'refine',
           durationMs: 60000,
           history: [{ word: 'fine', parents: [] }],
@@ -862,11 +855,9 @@ describe('HomeScreen day-detail popover — Share button native Web Share path',
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 99,
           longestWord: 'banana',
           durationMs: 60000,
           history: [{ word: 'banana', parents: [] }],
@@ -902,11 +893,9 @@ describe('HomeScreen day-detail popover — Share button native Web Share path',
     const wrapper = mount(HomeScreen, {
       props: {
         streak: 1,
-        best: 100,
         completedToday: false,
         recent: buildRecentWithHistory({
           date: '2026-04-22',
-          score: 50,
           longestWord: 'apple',
           durationMs: 60000,
           history: [{ word: 'apple', parents: [] }],

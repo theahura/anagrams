@@ -3,7 +3,6 @@ import {
   loadStore,
   recordDailyResult,
   currentStreak,
-  bestScore,
   hasCompletedDate,
   recentDays,
 } from '../src/storage.js';
@@ -55,34 +54,42 @@ describe('loadStore', () => {
 });
 
 describe('recordDailyResult', () => {
-  it('persists a date+score that becomes visible via the public API', () => {
+  it('persists a date that becomes visible via hasCompletedDate', () => {
     const fake = makeFakeStorage();
     recordDailyResult(fake, {
       date: '2026-04-25',
-      score: 142,
       longestWord: 'redefine',
       durationMs: 300000,
     });
     const { records } = loadStore(fake);
     expect(hasCompletedDate(records, '2026-04-25')).toBe(true);
-    expect(bestScore(records)).toBe(142);
+  });
+
+  it('persists the longestWord and durationMs round-trip', () => {
+    const fake = makeFakeStorage();
+    recordDailyResult(fake, {
+      date: '2026-04-25',
+      longestWord: 'redefine',
+      durationMs: 300000,
+    });
+    const { records } = loadStore(fake);
+    expect(records['2026-04-25'].longestWord).toBe('redefine');
+    expect(records['2026-04-25'].durationMs).toBe(300000);
   });
 
   it('keeps the first record on a same-date re-call', () => {
     const fake = makeFakeStorage();
     recordDailyResult(fake, {
       date: '2026-04-25',
-      score: 100,
       longestWord: 'first',
       durationMs: 10000,
     });
     const second = recordDailyResult(fake, {
       date: '2026-04-25',
-      score: 200,
       longestWord: 'second',
       durationMs: 20000,
     });
-    expect(bestScore(loadStore(fake).records)).toBe(100);
+    expect(loadStore(fake).records['2026-04-25'].longestWord).toBe('first');
     expect(second.wasNewRecord).toBe(false);
   });
 
@@ -90,7 +97,6 @@ describe('recordDailyResult', () => {
     const fake = makeFakeStorage();
     const result = recordDailyResult(fake, {
       date: '2026-04-25',
-      score: 100,
       longestWord: 'word',
       durationMs: 10000,
     });
@@ -103,12 +109,31 @@ describe('recordDailyResult', () => {
     expect(() => {
       result = recordDailyResult(broken, {
         date: '2026-04-25',
-        score: 50,
         longestWord: 'fail',
         durationMs: 1000,
       });
     }).not.toThrow();
     expect(result.wasNewRecord).toBe(false);
+  });
+
+  it('loads a pre-existing v1 record that still carries a score field without dropping its other fields', () => {
+    const fake = makeFakeStorage({
+      'anagrams:v1': JSON.stringify({
+        schemaVersion: 1,
+        records: {
+          '2026-04-25': {
+            score: 247,
+            longestWord: 'redefine',
+            durationMs: 60000,
+            completedAt: 12345,
+          },
+        },
+      }),
+    });
+    const { records } = loadStore(fake);
+    expect(records['2026-04-25'].longestWord).toBe('redefine');
+    expect(records['2026-04-25'].durationMs).toBe(60000);
+    expect(hasCompletedDate(records, '2026-04-25')).toBe(true);
   });
 });
 
@@ -172,21 +197,6 @@ describe('currentStreak', () => {
   });
 });
 
-describe('bestScore', () => {
-  it('returns 0 for empty records', () => {
-    expect(bestScore({})).toBe(0);
-  });
-
-  it('returns the maximum score across records', () => {
-    const records = {
-      '2026-04-21': { score: 50 },
-      '2026-04-22': { score: 200 },
-      '2026-04-23': { score: 75 },
-    };
-    expect(bestScore(records)).toBe(200);
-  });
-});
-
 describe('hasCompletedDate', () => {
   it('returns false when the date is not present', () => {
     expect(hasCompletedDate({}, '2026-04-25')).toBe(false);
@@ -207,7 +217,6 @@ describe('recordDailyResult — history field', () => {
     ];
     recordDailyResult(fake, {
       date: '2026-04-25',
-      score: 52,
       longestWord: 'refine',
       durationMs: 60000,
       history,
@@ -222,7 +231,6 @@ describe('recordDailyResult — history field', () => {
         schemaVersion: 1,
         records: {
           '2026-04-25': {
-            score: 100,
             longestWord: 'word',
             durationMs: 60000,
             completedAt: 12345,
@@ -249,7 +257,7 @@ describe('recentDays', () => {
 
   it('marks today as played and attaches the record when only today is recorded', () => {
     const records = {
-      '2026-04-25': { score: 142, longestWord: 'redefine', durationMs: 300000 },
+      '2026-04-25': { longestWord: 'redefine', durationMs: 300000 },
     };
     const out = recentDays(records, '2026-04-25');
     expect(out[6].played).toBe(true);
@@ -261,8 +269,8 @@ describe('recentDays', () => {
 
   it('marks the right indices as played for a mixed history', () => {
     const records = {
-      '2026-04-22': { score: 100 },
-      '2026-04-24': { score: 50 },
+      '2026-04-22': { longestWord: 'a' },
+      '2026-04-24': { longestWord: 'b' },
     };
     const out = recentDays(records, '2026-04-25');
     expect(out[3].date).toBe('2026-04-22');
@@ -278,8 +286,8 @@ describe('recentDays', () => {
 
   it('crosses month boundaries correctly', () => {
     const records = {
-      '2026-04-30': { score: 10 },
-      '2026-05-01': { score: 20 },
+      '2026-04-30': { longestWord: 'a' },
+      '2026-05-01': { longestWord: 'b' },
     };
     const out = recentDays(records, '2026-05-02');
     const datesInOrder = out.map((e) => e.date);

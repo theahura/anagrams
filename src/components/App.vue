@@ -2,14 +2,13 @@
 import { ref, shallowRef } from 'vue';
 import HomeScreen from './HomeScreen.vue';
 import GameScreen from './GameScreen.vue';
-import ScoreScreen from './ScoreScreen.vue';
+import ResultsScreen from './ResultsScreen.vue';
 import { loadDictionary } from '../dictionary.js';
 import { createGame } from '../game.js';
 import {
   loadStore,
   recordDailyResult,
   currentStreak,
-  bestScore,
   hasCompletedDate,
   recentDays,
   browserStorage,
@@ -25,14 +24,12 @@ const dictError = ref(null);
 
 const storage = browserStorage();
 const stats = ref(computeStats());
-const isNewBest = ref(false);
 
 function computeStats() {
   const today = todayLocal();
   const { records } = loadStore(storage);
   return {
     streak: currentStreak(records, today),
-    best: bestScore(records),
     completedToday: hasCompletedDate(records, today),
     recent: recentDays(records, today, 7),
   };
@@ -74,28 +71,21 @@ async function startGame(mode) {
 
 function endGameWithResult(result) {
   finalResult.value = result;
-  isNewBest.value = false;
   if (game.value?.mode === 'daily' && game.value?.date) {
-    const previousBest = bestScore(loadStore(storage).records);
-    const { wasNewRecord } = recordDailyResult(storage, {
+    recordDailyResult(storage, {
       date: game.value.date,
-      score: result.score,
       longestWord: result.longestWord,
       durationMs: result.totalTimeMs,
       history: result.history,
     });
-    if (wasNewRecord && result.score > previousBest) {
-      isNewBest.value = true;
-    }
     stats.value = computeStats();
   }
-  screen.value = 'score';
+  screen.value = 'results';
 }
 
 function returnHome() {
   game.value = null;
   finalResult.value = null;
-  isNewBest.value = false;
   stats.value = computeStats();
   screen.value = 'home';
 }
@@ -116,7 +106,6 @@ function returnHome() {
       v-if="screen === 'home'"
       :loading="dictLoading"
       :streak="stats.streak"
-      :best="stats.best"
       :completed-today="stats.completedToday"
       :recent="stats.recent"
       @start="startGame"
@@ -129,13 +118,12 @@ function returnHome() {
       @end="endGameWithResult"
     />
 
-    <ScoreScreen
-      v-else-if="screen === 'score' && finalResult"
+    <ResultsScreen
+      v-else-if="screen === 'results' && finalResult"
       :result="finalResult"
       :mode="game.mode"
       :date="game.date"
       :streak="stats.streak"
-      :is-new-best="isNewBest"
       @home="returnHome"
     />
   </div>

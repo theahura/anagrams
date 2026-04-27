@@ -27,7 +27,6 @@ function makeGame({ loose = [], words = [] }) {
       words: words.map((w) => ({ word: w, parents: [] })),
     },
     history: [],
-    missedDrawCount: 0,
     ended: false,
     startTime: Date.now(),
   };
@@ -460,8 +459,8 @@ describe('GameScreen sticky-claim trail', () => {
   });
 });
 
-describe('GameScreen draw — missed-draw feedback', () => {
-  it('shows a warning message after a draw when the loose pool had a possible word', async () => {
+describe('GameScreen draw — missed-anagram hint', () => {
+  it('shows a non-penalising warning hint when the loose pool had a possible word', async () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
     });
@@ -471,8 +470,7 @@ describe('GameScreen draw — missed-draw feedback', () => {
 
     const feedback = wrapper.find('.feedback');
     expect(feedback.classes()).toContain('warning');
-    expect(feedback.text()).toContain('Penalty');
-    expect(feedback.text()).toContain('−10');
+    expect(feedback.text()).toBe('A word was available.');
   });
 
   it('clears feedback after a draw when the loose pool had no possible word', async () => {
@@ -507,7 +505,7 @@ describe('GameScreen draw — missed-draw feedback', () => {
     expect(feedback.classes()).not.toContain('error');
   });
 
-  it('uses the Unicode minus sign (U+2212), not the hyphen-minus (U+002D)', async () => {
+  it('hint text contains no penalty or points language', async () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
     });
@@ -516,19 +514,8 @@ describe('GameScreen draw — missed-draw feedback', () => {
     await drawBtn.trigger('click');
 
     const text = wrapper.find('.feedback').text();
-    expect(text).toContain('−');
-    expect(text).not.toContain('-10');
-  });
-
-  it('does not contain an em-dash (U+2014) in the warning text', async () => {
-    const wrapper = mount(GameScreen, {
-      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
-    });
-
-    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
-    await drawBtn.trigger('click');
-
-    expect(wrapper.find('.feedback').text()).not.toContain('—');
+    expect(text).not.toMatch(/penalty/i);
+    expect(text).not.toMatch(/points/i);
   });
 
   it('flips warning to success when a valid word is submitted after the missed draw', async () => {
@@ -562,8 +549,22 @@ describe('GameScreen draw — missed-draw feedback', () => {
 
     const feedback = wrapper.find('.feedback');
     expect(feedback.classes()).toContain('warning');
-    expect(feedback.text()).toContain('steal');
-    expect(feedback.text()).toContain('−10');
+    expect(feedback.text()).toBe('A steal was available.');
+  });
+});
+
+describe('GameScreen header', () => {
+  it('does not render a Score: label or score number', () => {
+    const wrapper = mount(GameScreen, {
+      props: {
+        initialGame: makeGame({ loose: ['c', 'a', 't'] }),
+        dict,
+      },
+    });
+    const info = wrapper.find('.game-info');
+    expect(info.exists()).toBe(true);
+    expect(info.text()).not.toMatch(/Score/i);
+    expect(info.find('.score').exists()).toBe(false);
   });
 });
 

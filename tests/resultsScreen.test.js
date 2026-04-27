@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
-import ScoreScreen from '../src/components/ScoreScreen.vue';
+import ResultsScreen from '../src/components/ResultsScreen.vue';
 
 function installClipboardMock(writeTextImpl) {
   Object.defineProperty(navigator, 'clipboard', {
@@ -12,10 +12,8 @@ function installClipboardMock(writeTextImpl) {
 
 function makeResult(overrides = {}) {
   return {
-    score: 100,
     totalTimeMs: 60000,
     words: ['rook'],
-    missedDrawCount: 0,
     longestWord: 'rook',
     longestChain: ['rook'],
     history: [{ word: 'rook', parents: [] }],
@@ -23,13 +21,98 @@ function makeResult(overrides = {}) {
   };
 }
 
-describe('ScoreScreen — Copy alt text button', () => {
+describe('ResultsScreen — content', () => {
+  it('does not render a Final score cell or score number', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: { result: makeResult(), mode: 'daily', date: '2026-04-25' },
+    });
+    expect(wrapper.text()).not.toMatch(/Final score/i);
+  });
+
+  it('does not render a Missed draws cell', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: { result: makeResult(), mode: 'daily', date: '2026-04-25' },
+    });
+    expect(wrapper.text()).not.toMatch(/Missed draws/i);
+  });
+
+  it('does not render a New best pill', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: {
+        result: makeResult(),
+        mode: 'daily',
+        date: '2026-04-25',
+        streak: 5,
+      },
+    });
+    expect(wrapper.text()).not.toMatch(/New best/i);
+  });
+
+  it('shows Total time and Words count cells', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: {
+        result: makeResult({
+          totalTimeMs: 5 * 60 * 1000 + 23 * 1000,
+          words: ['cat', 'rook', 'dog', 'apple'],
+        }),
+        mode: 'daily',
+        date: '2026-04-25',
+      },
+    });
+    const cells = wrapper.findAll('.results-cell');
+    const cellTexts = cells.map((c) => c.text());
+    const timeCell = cellTexts.find((t) => /Total time/i.test(t));
+    const wordsCell = cellTexts.find((t) => /^Words/i.test(t));
+    expect(timeCell).toBeDefined();
+    expect(timeCell).toContain('5:23');
+    expect(wordsCell).toBeDefined();
+    expect(wordsCell).toContain('4');
+  });
+
+  it('shows the streak row in daily mode when streak > 0', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: {
+        result: makeResult(),
+        mode: 'daily',
+        date: '2026-04-25',
+        streak: 4,
+      },
+    });
+    expect(wrapper.text()).toMatch(/Streak/i);
+    expect(wrapper.text()).toContain('4');
+  });
+
+  it('hides the streak row in daily mode when streak is 0', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: {
+        result: makeResult(),
+        mode: 'daily',
+        date: '2026-04-25',
+        streak: 0,
+      },
+    });
+    expect(wrapper.text()).not.toMatch(/Streak/i);
+  });
+
+  it('hides the streak row in random mode regardless of streak value', () => {
+    const wrapper = mount(ResultsScreen, {
+      props: {
+        result: makeResult(),
+        mode: 'random',
+        streak: 5,
+      },
+    });
+    expect(wrapper.text()).not.toMatch(/Streak/i);
+  });
+});
+
+describe('ResultsScreen — Copy alt text button', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it('renders Copy alt text button when result.history is non-empty', () => {
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: { result: makeResult(), mode: 'daily', date: '2026-04-25' },
     });
     const buttons = wrapper.findAll('button');
@@ -38,7 +121,7 @@ describe('ScoreScreen — Copy alt text button', () => {
   });
 
   it('does not render Copy alt text button when result.history is empty', () => {
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({ history: [] }),
         mode: 'daily',
@@ -51,7 +134,7 @@ describe('ScoreScreen — Copy alt text button', () => {
   });
 
   it('does not render Copy alt text button when result.history is missing', () => {
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({ history: undefined }),
         mode: 'daily',
@@ -63,14 +146,13 @@ describe('ScoreScreen — Copy alt text button', () => {
     expect(altBtn).toBeUndefined();
   });
 
-  it('clicking Copy alt text writes a plaintext narrative containing Word 1: and the score, no emoji', async () => {
+  it('clicking Copy alt text writes a plaintext narrative containing Word 1: and no emoji', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     installClipboardMock(writeText);
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({
-          score: 142,
           longestWord: 'redefine',
           longestChain: ['fine', 'refine', 'redefine'],
           history: [
@@ -91,7 +173,6 @@ describe('ScoreScreen — Copy alt text button', () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     const text = writeText.mock.calls[0][0];
     expect(text).toContain('Word 1:');
-    expect(text).toContain('142');
     expect(text).not.toMatch(/[\u{1F7E8}-\u{1F7E9}]/u);
   });
 
@@ -99,9 +180,9 @@ describe('ScoreScreen — Copy alt text button', () => {
     installClipboardMock(vi.fn().mockRejectedValue(new Error('denied')));
     const promptSpy = vi.spyOn(window, 'prompt').mockImplementation(() => null);
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
-        result: makeResult({ score: 75 }),
+        result: makeResult(),
         mode: 'daily',
         date: '2026-04-25',
       },
@@ -113,14 +194,13 @@ describe('ScoreScreen — Copy alt text button', () => {
 
     expect(promptSpy).toHaveBeenCalledTimes(1);
     const promptText = promptSpy.mock.calls[0][1];
-    expect(promptText).toContain('75');
     expect(promptText).toContain('Word 1:');
   });
 
   it('Copy alt text button label flips to Copied! after a successful click', async () => {
     installClipboardMock(vi.fn().mockResolvedValue(undefined));
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult(),
         mode: 'daily',
@@ -142,7 +222,7 @@ describe('ScoreScreen — Copy alt text button', () => {
   it('Copy alt text and Share are independent: clicking alt does not flip Share label', async () => {
     installClipboardMock(vi.fn().mockResolvedValue(undefined));
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult(),
         mode: 'daily',
@@ -161,7 +241,7 @@ describe('ScoreScreen — Copy alt text button', () => {
   });
 });
 
-describe('ScoreScreen — primary Share button (regression)', () => {
+describe('ResultsScreen — primary Share button (regression)', () => {
   afterEach(() => {
     Object.defineProperty(navigator, 'share', {
       value: undefined,
@@ -180,10 +260,9 @@ describe('ScoreScreen — primary Share button (regression)', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     installClipboardMock(writeText);
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({
-          score: 142,
           longestWord: 'redefine',
           longestChain: ['fine', 'refine', 'redefine'],
           history: [
@@ -202,11 +281,10 @@ describe('ScoreScreen — primary Share button (regression)', () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     const text = writeText.mock.calls[0][0];
     expect(text).toMatch(/[\u{1F7E8}-\u{1F7E9}]/u);
-    expect(text).toContain('142');
   });
 });
 
-describe('ScoreScreen — Share button native Web Share path', () => {
+describe('ResultsScreen — Share button native Web Share path', () => {
   function setShare(impl) {
     Object.defineProperty(navigator, 'share', {
       value: impl,
@@ -246,10 +324,9 @@ describe('ScoreScreen — Share button native Web Share path', () => {
     setCanShare(() => true);
     installClipboardMock(writeText);
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({
-          score: 142,
           history: [{ word: 'fine', parents: [] }],
         }),
         mode: 'daily',
@@ -278,10 +355,9 @@ describe('ScoreScreen — Share button native Web Share path', () => {
     setCanShare(() => true);
     installClipboardMock(writeText);
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({
-          score: 99,
           history: [{ word: 'foo', parents: [] }],
         }),
         mode: 'daily',
@@ -310,10 +386,9 @@ describe('ScoreScreen — Share button native Web Share path', () => {
     setCanShare(() => true);
     installClipboardMock(writeText);
 
-    const wrapper = mount(ScoreScreen, {
+    const wrapper = mount(ResultsScreen, {
       props: {
         result: makeResult({
-          score: 50,
           history: [{ word: 'bar', parents: [] }],
         }),
         mode: 'daily',

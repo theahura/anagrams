@@ -7,14 +7,13 @@ const TAIL_KEEP = 3;
 export function generateShareText({
   mode,
   date,
-  score,
   longestWord,
   totalTimeMs,
   history = [],
   streak = 0,
 }) {
   const headerId = mode === 'daily' ? date : 'Random';
-  const header = `Anagrams ${headerId} — ${score}`;
+  const header = `Anagrams ${headerId}`;
 
   const rows = history.map((entry) => {
     const carried = (entry.parents || []).reduce(
@@ -84,7 +83,6 @@ const MONTH_NAMES = [
 export function generateShareAltText({
   mode,
   date,
-  score,
   longestWord,
   totalTimeMs,
   history = [],
@@ -92,7 +90,7 @@ export function generateShareAltText({
 }) {
   const headerSubject =
     mode === 'daily' ? `daily ${humanizeDate(date)}` : 'random run';
-  const header = `Anagrams, ${headerSubject}. Score ${score}.`;
+  const header = `Anagrams, ${headerSubject}.`;
 
   const rows = history.map((entry, i) => sentenceFor(entry, i + 1));
 

@@ -5,24 +5,22 @@ import {
   shareOrCopy,
 } from '../src/share.js';
 
-describe('generateShareText — daily mode', () => {
-  it('includes the date and final score', () => {
+describe('generateShareText — daily mode header', () => {
+  it('includes the date in the header and does not include a score number', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 142,
       longestWord: 'redefine',
       totalTimeMs: 5 * 60 * 1000,
     });
-    expect(text).toContain('2026-04-25');
-    expect(text).toContain('142');
+    expect(text).toContain('Anagrams 2026-04-25');
+    expect(text).not.toMatch(/Anagrams 2026-04-25\s*[—-]/);
   });
 
   it('includes the longest word length', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 50,
       longestWord: 'redefine',
       totalTimeMs: 60000,
     });
@@ -33,14 +31,12 @@ describe('generateShareText — daily mode', () => {
     const a = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 12,
       longestWord: 'cat',
       totalTimeMs: 10000,
     });
     const b = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 12,
       longestWord: 'cat',
       totalTimeMs: 10000,
     });
@@ -52,7 +48,6 @@ describe('generateShareText — random mode', () => {
   it('does not include a specific date', () => {
     const text = generateShareText({
       mode: 'random',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
     });
@@ -69,7 +64,6 @@ describe('generateShareText — emoji grid', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 0,
       history: [],
@@ -82,7 +76,6 @@ describe('generateShareText — emoji grid', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 16,
       longestWord: 'fine',
       totalTimeMs: 30000,
       history: [{ word: 'fine', parents: [] }],
@@ -96,7 +89,6 @@ describe('generateShareText — emoji grid', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 52,
       longestWord: 'refine',
       totalTimeMs: 60000,
       history: [
@@ -111,7 +103,6 @@ describe('generateShareText — emoji grid', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 116,
       longestWord: 'redefine',
       totalTimeMs: 120000,
       history: [
@@ -131,7 +122,6 @@ describe('generateShareText — emoji grid', () => {
   it('renders a multi-parent steal as all yellow', () => {
     const text = generateShareText({
       mode: 'random',
-      score: 24,
       longestWord: 'redo',
       totalTimeMs: 45000,
       history: [
@@ -153,7 +143,6 @@ describe('generateShareText — emoji grid', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 116,
       longestWord: 'redefine',
       totalTimeMs: 5 * 60 * 1000,
       history: [{ word: 'redefine', parents: [] }],
@@ -168,7 +157,6 @@ describe('generateShareText — streak suffix', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
       streak: 5,
@@ -180,7 +168,6 @@ describe('generateShareText — streak suffix', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
       streak: 1,
@@ -192,14 +179,12 @@ describe('generateShareText — streak suffix', () => {
     const omitted = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
     });
     const zero = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
       streak: 0,
@@ -211,7 +196,6 @@ describe('generateShareText — streak suffix', () => {
   it('does not include Streak in random mode regardless of streak value', () => {
     const text = generateShareText({
       mode: 'random',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
       streak: 7,
@@ -243,7 +227,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 96,
       longestWord: 'aaaa',
       totalTimeMs: 60000,
       history,
@@ -259,7 +242,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 1080,
       longestWord: 'aaaaaa',
       totalTimeMs: 5 * 60 * 1000,
       history,
@@ -275,12 +257,11 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 1080,
       longestWord: 'aaaaaa',
       totalTimeMs: 5 * 60 * 1000,
       history,
     });
-    expect(text).toContain('Anagrams 2026-04-25 — 1080');
+    expect(text).toContain('Anagrams 2026-04-25');
   });
 
   it('preserves the full footer (Longest, Time, Streak) verbatim when truncated', () => {
@@ -288,7 +269,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 1080,
       longestWord: 'aaaaaaaa',
       totalTimeMs: 5 * 60 * 1000,
       history,
@@ -316,7 +296,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 999,
       longestWord: 'eeeeee',
       totalTimeMs: 60000,
       history,
@@ -352,7 +331,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 5000,
       longestWord: 'aaaaaaaaaa',
       totalTimeMs: 10 * 60 * 1000,
       history,
@@ -366,7 +344,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 2268,
       longestWord: 'a'.repeat(18),
       totalTimeMs: 60000,
       history,
@@ -379,7 +356,6 @@ describe('generateShareText — truncation', () => {
     const text = generateShareText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 1350,
       longestWord: 'a'.repeat(15),
       totalTimeMs: 60000,
       history,
@@ -392,38 +368,35 @@ describe('generateShareText — truncation', () => {
 });
 
 describe('generateShareAltText', () => {
-  it('daily-mode header includes a humanized date and score, no YYYY-MM-DD', () => {
+  it('daily-mode header includes a humanized date and no YYYY-MM-DD or score number', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 142,
       longestWord: 'redefine',
       totalTimeMs: 5 * 60 * 1000,
       history: [],
     });
     expect(text).not.toMatch(/2026-04-25/);
     expect(text).toMatch(/April 25 2026/);
-    expect(text).toContain('142');
+    expect(text).not.toMatch(/Score/);
   });
 
   it('random-mode header reads "random run" with no date', () => {
     const text = generateShareAltText({
       mode: 'random',
-      score: 50,
       longestWord: 'rook',
       totalTimeMs: 60000,
       history: [],
     });
     expect(text).not.toMatch(/\d{4}/);
     expect(text.toLowerCase()).toContain('random run');
-    expect(text).toContain('50');
+    expect(text).not.toMatch(/Score/);
   });
 
   it('emits "Word 1: 4 new letters." for a single root-word history entry', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 16,
       longestWord: 'rook',
       totalTimeMs: 30000,
       history: [{ word: 'rook', parents: [] }],
@@ -435,7 +408,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 25,
       longestWord: 'brook',
       totalTimeMs: 60000,
       history: [
@@ -451,7 +423,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 100,
       longestWord: 'redefine',
       totalTimeMs: 60000,
       history: [
@@ -470,7 +441,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 64,
       longestWord: 'redefine',
       totalTimeMs: 60000,
       history: [],
@@ -482,7 +452,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 60000,
       history: [],
@@ -494,7 +463,6 @@ describe('generateShareAltText', () => {
     const t45 = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 45000,
       history: [],
@@ -504,7 +472,6 @@ describe('generateShareAltText', () => {
     const t1 = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 1000,
       history: [],
@@ -516,7 +483,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 5 * 60 * 1000,
       history: [],
@@ -529,7 +495,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 5 * 60 * 1000 + 23 * 1000,
       history: [],
@@ -541,7 +506,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 60000,
       history: [],
@@ -553,7 +517,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 100,
       longestWord: 'rook',
       totalTimeMs: 60000,
       history: [],
@@ -566,7 +529,6 @@ describe('generateShareAltText', () => {
     const t0 = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 100,
       longestWord: 'rook',
       totalTimeMs: 60000,
       history: [],
@@ -575,7 +537,6 @@ describe('generateShareAltText', () => {
     const t1 = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 100,
       longestWord: 'rook',
       totalTimeMs: 60000,
       history: [],
@@ -588,7 +549,6 @@ describe('generateShareAltText', () => {
   it('streak suffix is suppressed in random mode regardless of streak value', () => {
     const text = generateShareAltText({
       mode: 'random',
-      score: 100,
       longestWord: 'rook',
       totalTimeMs: 60000,
       history: [],
@@ -613,7 +573,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 500,
       longestWord: 'jjjjjjjjjjjj',
       totalTimeMs: 60000,
       history,
@@ -637,7 +596,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 60000,
       history,
@@ -654,7 +612,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 60000,
       history,
@@ -668,7 +625,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 0,
       longestWord: '',
       totalTimeMs: 60000,
       history: [],
@@ -687,7 +643,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 100,
       longestWord: 'redefine',
       totalTimeMs: 60000,
       history,
@@ -700,7 +655,6 @@ describe('generateShareAltText', () => {
     const text = generateShareAltText({
       mode: 'daily',
       date: '2026-04-25',
-      score: 100,
       longestWord: 'redefine',
       totalTimeMs: 60000,
       history: [{ word: 'rook', parents: [] }],
@@ -864,4 +818,3 @@ describe('shareOrCopy', () => {
     expect(promptSpy.mock.calls[0][1]).toBe('payload');
   });
 });
-

@@ -9,7 +9,6 @@ import {
 const props = defineProps({
   loading: { type: Boolean, default: false },
   streak: { type: Number, default: 0 },
-  best: { type: Number, default: 0 },
   completedToday: { type: Boolean, default: false },
   recent: { type: Array, default: () => [] },
 });
@@ -48,7 +47,6 @@ function buildSelectedShareArgs(entry) {
   return {
     mode: 'daily',
     date: entry.date,
-    score: entry.record.score,
     longestWord: entry.record.longestWord,
     totalTimeMs: entry.record.durationMs,
     history: entry.record.history,
@@ -113,12 +111,10 @@ function cellLabel(entry, isToday) {
   const human = humanDate(entry.date);
   if (isToday) {
     return entry.played
-      ? `Today, score ${entry.record?.score ?? 0}, ${human}`
+      ? `Today, played, ${human}`
       : `Today, not played yet, ${human}`;
   }
-  return entry.played
-    ? `Score ${entry.record?.score ?? 0}, ${human}`
-    : `Not played, ${human}`;
+  return entry.played ? `Played, ${human}` : `Not played, ${human}`;
 }
 
 function formatDuration(ms) {
@@ -243,9 +239,8 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div v-if="streak > 0 || best > 0" class="home-stats">
+    <div v-if="streak > 0" class="home-stats">
       <span class="home-stat">Streak <strong>{{ streak }}</strong></span>
-      <span class="home-stat">Best <strong>{{ best }}</strong></span>
     </div>
 
     <div
@@ -305,10 +300,6 @@ onBeforeUnmount(() => {
         <h3 id="day-popover-title" class="day-popover-title">
           {{ humanDate(selectedEntry.date) }}
         </h3>
-        <div class="day-popover-row">
-          <span class="day-popover-label">Score</span>
-          <span class="day-popover-value">{{ selectedEntry.record?.score ?? 0 }}</span>
-        </div>
         <div class="day-popover-row">
           <span class="day-popover-label">Longest</span>
           <span class="day-popover-value">{{ selectedEntry.record?.longestWord || '—' }}</span>

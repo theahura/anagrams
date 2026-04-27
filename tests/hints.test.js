@@ -4,11 +4,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadDictionary } from '../src/dictionary.js';
 import {
-  scoreWord,
   hasLoosePoolAnagram,
   hasMissedAnagram,
-  finalScore,
-} from '../src/scoring.js';
+} from '../src/hints.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DICT_PATH = path.resolve(__dirname, '..', 'data', 'dictionary.json');
@@ -20,14 +18,6 @@ beforeAll(() => {
   const raw = JSON.parse(readFileSync(DICT_PATH, 'utf8'));
   const lemmasRaw = JSON.parse(readFileSync(LEMMAS_PATH, 'utf8'));
   dict = loadDictionary(raw, lemmasRaw);
-});
-
-describe('scoreWord', () => {
-  it('returns the square of the word length', () => {
-    expect(scoreWord('cat')).toBe(9);
-    expect(scoreWord('brook')).toBe(25);
-    expect(scoreWord('redefine')).toBe(64);
-  });
 });
 
 describe('hasLoosePoolAnagram', () => {
@@ -93,19 +83,5 @@ describe('hasMissedAnagram', () => {
     expect(
       hasMissedAnagram(pool({ loose: ['e', 'd'], words: ['fin'] }), dict),
     ).toBe('steal');
-  });
-});
-
-describe('finalScore', () => {
-  it('sums word scores minus 10 per missed-anagram draw', () => {
-    const state = {
-      words: [{ word: 'cat' }, { word: 'brook' }],
-      missedDrawCount: 2,
-    };
-    expect(finalScore(state)).toBe(9 + 25 - 20);
-  });
-
-  it('returns zero for an empty game', () => {
-    expect(finalScore({ words: [], missedDrawCount: 0 })).toBe(0);
   });
 });
