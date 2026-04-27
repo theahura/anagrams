@@ -581,43 +581,217 @@ button.home-calendar-cell:focus-visible {
   font-size: 12px;
 }
 
-.rules {
-  text-align: left;
-  margin-top: 36px;
-  padding-top: 16px;
-  border-top: 1px solid #3a3a3c;
+/* === Instructions Panel === */
+.instructions-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
 }
 
-.rules h2 {
-  font-size: 12px;
+.instructions-panel {
+  background: #1a1a1b;
+  border: 1px solid #3a3a3c;
+  border-radius: 8px;
+  padding: 32px 28px 24px;
+  max-width: 420px;
+  width: 100%;
+  position: relative;
+  color: #d7dadc;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  text-align: left;
+}
+
+.instructions-panel:focus {
+  outline: none;
+}
+
+.instructions-panel h2 {
+  text-align: center;
+  font-size: 22px;
+  margin-bottom: 14px;
+  letter-spacing: 1px;
+}
+
+.instructions-panel p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  color: #818384;
+}
+
+.instructions-panel strong {
+  color: #d7dadc;
+}
+
+.instructions-panel em {
+  color: #d7dadc;
+  font-style: italic;
+}
+
+.instructions-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: transparent;
+  border: 0;
+  color: #818384;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.instructions-close:hover {
+  color: #d7dadc;
+}
+
+.instructions-close:focus-visible {
+  outline: 2px solid #b59f3b;
+  outline-offset: 1px;
+}
+
+.instructions-example {
+  text-align: center;
+  margin: 16px 0;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+
+.instructions-example-label {
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 2px;
   color: #818384;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+.instructions-example-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.instructions-example-row .tile {
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  margin: 0;
+}
+
+.instructions-example-row .tile.offered {
+  background: #538d4e;
+  border-color: #538d4e;
+  color: #fff;
+}
+
+.instructions-example-plus {
+  font-size: 18px;
+  color: #565758;
+  margin: 0 4px;
   font-weight: 600;
 }
 
-.rules ul {
+.instructions-example-arrow {
+  color: #565758;
+  font-size: 18px;
+  margin: 4px 0;
+}
+
+.instructions-example-answer {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #6aaa64;
+  margin-bottom: 8px;
+}
+
+.instructions-example-note {
+  font-size: 12px;
+  color: #818384;
+  margin-top: 10px;
+  margin-bottom: 0;
+  text-align: center;
+}
+
+.instructions-panel ul {
   list-style: none;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.rules li {
+.instructions-panel li {
   font-size: 14px;
-  color: #d7dadc;
-  padding-left: 14px;
+  color: #818384;
+  padding: 4px 0 4px 16px;
   position: relative;
+  line-height: 1.5;
 }
 
-.rules li::before {
-  content: '·';
+.instructions-panel li::before {
+  content: '\2022';
   position: absolute;
   left: 0;
   color: #538d4e;
+}
+
+.instructions-hint {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #3a3a3c;
+  text-align: center;
+  font-size: 12px;
+  color: #585858;
+}
+
+.instructions-hint kbd {
+  display: inline-block;
+  margin: 0 3px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.instructions-trigger {
+  background: transparent;
+  color: #818384;
+  border: 1px solid #3a3a3c;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
   font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-left: 8px;
+  line-height: 1;
+}
+
+.instructions-trigger:hover {
+  color: #d7dadc;
+  border-color: #818384;
+}
+
+.instructions-trigger:focus-visible {
+  outline: 2px solid #b59f3b;
+  outline-offset: 2px;
 }
 
 /* === Score screen === */

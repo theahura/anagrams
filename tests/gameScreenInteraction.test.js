@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { readFileSync } from 'fs';
 import path from 'path';
@@ -32,6 +32,20 @@ function makeGame({ loose = [], words = [] }) {
     startTime: Date.now(),
   };
 }
+
+async function dismissInstructions(wrapper) {
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+  );
+  await wrapper.vm.$nextTick();
+  await wrapper.vm.$nextTick();
+}
+
+afterEach(() => {
+  document
+    .querySelectorAll('.instructions-overlay, [role="dialog"]')
+    .forEach((n) => n.remove());
+});
 
 describe('GameScreen click-to-stage interactions', () => {
   it('appends the clicked face-up tile letter to the input', async () => {
@@ -297,6 +311,7 @@ describe('GameScreen accessibility', () => {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
       attachTo: document.body,
     });
+    await dismissInstructions(wrapper);
 
     const input = wrapper.find('input.text-input');
     input.element.focus();
@@ -572,6 +587,7 @@ describe('GameScreen keyboard shortcuts', () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
     });
+    await dismissInstructions(wrapper);
 
     const before = wrapper.findAll('.tile-rack .tile').length;
     document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
@@ -586,6 +602,7 @@ describe('GameScreen keyboard shortcuts', () => {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
       attachTo: document.body,
     });
+    await dismissInstructions(wrapper);
 
     const input = wrapper.find('input.text-input');
     await input.setValue('ca');
@@ -607,6 +624,7 @@ describe('GameScreen keyboard shortcuts', () => {
       pool: { faceDown: [], looseLetters: ['a', 'b', 'c'], words: [] },
     };
     const wrapper = mount(GameScreen, { props: { initialGame: game, dict } });
+    await dismissInstructions(wrapper);
 
     const before = wrapper.findAll('.tile-rack .tile').length;
     document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
@@ -620,6 +638,7 @@ describe('GameScreen keyboard shortcuts', () => {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
       attachTo: document.body,
     });
+    await dismissInstructions(wrapper);
 
     document.body.focus();
     const input = wrapper.find('input.text-input');
@@ -632,12 +651,12 @@ describe('GameScreen keyboard shortcuts', () => {
     wrapper.unmount();
   });
 
-  it('focuses the typed input when the screen mounts', async () => {
+  it('focuses the typed input after the instructions panel is dismissed', async () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
       attachTo: document.body,
     });
-    await wrapper.vm.$nextTick();
+    await dismissInstructions(wrapper);
 
     const input = wrapper.find('input.text-input');
     expect(document.activeElement).toBe(input.element);
@@ -648,6 +667,7 @@ describe('GameScreen keyboard shortcuts', () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
     });
+    await dismissInstructions(wrapper);
 
     const before = wrapper.findAll('.tile-rack .tile').length;
     for (let i = 0; i < 5; i++) {
@@ -665,6 +685,7 @@ describe('GameScreen keyboard shortcuts', () => {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
       attachTo: document.body,
     });
+    await dismissInstructions(wrapper);
 
     const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
     await drawBtn.trigger('click');
