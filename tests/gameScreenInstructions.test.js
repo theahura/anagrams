@@ -27,7 +27,6 @@ function makeGame({ loose = [], words = [] }) {
       words: words.map((w) => ({ word: w, parents: [] })),
     },
     history: [],
-    missedDrawCount: 0,
     ended: false,
     startTime: Date.now(),
   };

@@ -41,10 +41,9 @@ describe('createGame', () => {
     expect(a.pool.looseLetters).not.toEqual(b.pool.looseLetters);
   });
 
-  it('starts with empty words list and zero missed draws', () => {
+  it('starts with empty words list', () => {
     const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
     expect(game.pool.words).toEqual([]);
-    expect(game.missedDrawCount).toBe(0);
   });
 });
 
@@ -54,27 +53,6 @@ describe('drawTile', () => {
     const next = drawTile(game, dict);
     expect(next.pool.looseLetters.length).toBe(game.pool.looseLetters.length + 1);
     expect(next.pool.faceDown.length).toBe(game.pool.faceDown.length - 1);
-  });
-
-  it('increments missedDrawCount when an anagram existed in the loose pool', () => {
-    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
-    // Force loose letters to definitely contain a word "cat"
-    const seeded = {
-      ...game,
-      pool: { ...game.pool, looseLetters: ['c', 'a', 't'] },
-    };
-    const next = drawTile(seeded, dict);
-    expect(next.missedDrawCount).toBe(1);
-  });
-
-  it('does not increment missedDrawCount when no anagram existed', () => {
-    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
-    const seeded = {
-      ...game,
-      pool: { ...game.pool, looseLetters: ['x', 'q', 'z'] },
-    };
-    const next = drawTile(seeded, dict);
-    expect(next.missedDrawCount).toBe(0);
   });
 
   it('marks game as ended when face-down was empty', () => {
@@ -98,31 +76,6 @@ describe('drawTile', () => {
     expect(next.pool.faceDown).toEqual([]);
     expect(next.pool.looseLetters).toContain('z');
   });
-
-  it('applies the missed-draw penalty when drawing the last face-down tile', () => {
-    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
-    const seeded = {
-      ...game,
-      pool: { ...game.pool, faceDown: ['z'], looseLetters: ['c', 'a', 't'] },
-    };
-    const next = drawTile(seeded, dict);
-    expect(next.missedDrawCount).toBe(1);
-  });
-
-  it('increments missedDrawCount when a single-parent steal was available', () => {
-    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
-    const seeded = {
-      ...game,
-      pool: {
-        ...game.pool,
-        looseLetters: ['b'],
-        words: [{ word: 'rook', parents: [] }],
-      },
-    };
-    const next = drawTile(seeded, dict);
-    expect(next.missedDrawCount).toBe(1);
-  });
-
 });
 
 describe('submitWord', () => {
@@ -149,7 +102,7 @@ describe('submitWord', () => {
 });
 
 describe('endGame', () => {
-  it('reports total score and the full transformation chain even when intermediate words have been consumed', () => {
+  it('reports the full transformation chain and total time even when intermediate words have been consumed', () => {
     const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
     const withHistory = {
       ...game,
@@ -162,11 +115,9 @@ describe('endGame', () => {
         { word: 'refine', parents: ['fine'] },
         { word: 'redefine', parents: ['refine'] },
       ],
-      missedDrawCount: 0,
       startTime: 1000,
     };
     const result = endGame(withHistory, 5000);
-    expect(result.score).toBe(16 + 36 + 64);
     expect(result.longestWord).toBe('redefine');
     expect(result.longestChain).toEqual(['fine', 'refine', 'redefine']);
     expect(result.totalTimeMs).toBe(4000);
@@ -177,13 +128,13 @@ describe('endGame', () => {
     const withHistory = {
       ...game,
       history: [{ word: 'cat', parents: [] }],
-      missedDrawCount: 0,
       startTime: 0,
     };
     const result = endGame(withHistory, 1000);
     expect(result.longestWord).toBe('cat');
     expect(result.longestChain).toEqual(['cat']);
   });
+
 });
 
 describe('submitWord history tracking', () => {

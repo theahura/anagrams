@@ -57,6 +57,16 @@ describe('InstructionsPanel rendering', () => {
     expect(mentionsRule).toBe(true);
     wrapper.unmount();
   });
+
+  it('does not contain any scoring or points language in the body', () => {
+    const wrapper = mount(InstructionsPanel, { attachTo: document.body });
+    const dialog = document.querySelector('[role="dialog"]');
+    const text = dialog.textContent.toLowerCase();
+    expect(text).not.toMatch(/score/);
+    expect(text).not.toMatch(/points/);
+    expect(text).not.toMatch(/penalty/);
+    wrapper.unmount();
+  });
 });
 
 describe('InstructionsPanel dismissal', () => {

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { drawTile, submitWord, endGame } from '../game.js';
-import { finalScore, hasMissedAnagram } from '../scoring.js';
+import { hasMissedAnagram } from '../hints.js';
 import { highlightConsumption } from '../staging.js';
 import InstructionsPanel from './InstructionsPanel.vue';
 
@@ -56,13 +56,6 @@ function wordLabel(w, i) {
   const claimed = consumption.value.words.has(i) ? ', claimed' : '';
   return `Word ${w.word}, ${w.word.length} letters${claimed}`;
 }
-
-const score = computed(() =>
-  finalScore({
-    words: game.value.history,
-    missedDrawCount: game.value.missedDrawCount,
-  })
-);
 
 const looseLetters = computed(() => game.value.pool.looseLetters);
 const playerWords = computed(() => game.value.pool.words);
@@ -207,15 +200,9 @@ function onDraw() {
   const next = drawTile(game.value, props.dict);
   game.value = next;
   if (missedKind === 'steal') {
-    feedback.value = {
-      type: 'warning',
-      text: 'Penalty: a steal was available. −10 points.',
-    };
+    feedback.value = { type: 'warning', text: 'A steal was available.' };
   } else if (missedKind === 'loose') {
-    feedback.value = {
-      type: 'warning',
-      text: 'Penalty: a word was available. −10 points.',
-    };
+    feedback.value = { type: 'warning', text: 'A word was available.' };
   } else {
     feedback.value = null;
   }
@@ -266,7 +253,6 @@ function formatTime(ms) {
     <div class="game-info">
       <span class="meta">{{ game.mode === 'daily' ? `Daily ${game.date}` : 'Random' }}</span>
       <span id="timer" aria-live="off">{{ formatTime(elapsedMs) }}</span>
-      <span class="score">Score: {{ score }}</span>
       <button
         ref="helpBtnRef"
         type="button"

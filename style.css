@@ -219,11 +219,6 @@ button.word-row {
   font-weight: 600;
 }
 
-.game-info .score {
-  color: #538d4e;
-  font-weight: 600;
-}
-
 /* === Word input === */
 .word-input {
   display: flex;
@@ -794,12 +789,12 @@ button.home-calendar-cell:focus-visible {
   outline-offset: 2px;
 }
 
-/* === Score screen === */
-.score-screen {
+/* === Results screen === */
+.results-screen {
   text-align: center;
 }
 
-.score-screen h2 {
+.results-screen h2 {
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 4px;
@@ -808,21 +803,21 @@ button.home-calendar-cell:focus-visible {
   font-weight: 600;
 }
 
-.score-grid {
+.results-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-bottom: 24px;
 }
 
-.score-cell {
+.results-cell {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid #3a3a3c;
   border-radius: 4px;
   padding: 16px 8px;
 }
 
-.score-label {
+.results-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 2px;
@@ -830,14 +825,14 @@ button.home-calendar-cell:focus-visible {
   margin-bottom: 6px;
 }
 
-.score-value {
+.results-value {
   font-size: 28px;
   font-weight: 700;
   color: #d7dadc;
   font-variant-numeric: tabular-nums;
 }
 
-.score-streak-row {
+.results-streak-row {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -849,21 +844,11 @@ button.home-calendar-cell:focus-visible {
   color: #818384;
 }
 
-.score-streak strong {
+.results-streak strong {
   color: #d7dadc;
   font-weight: 700;
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
-}
-
-.new-best-pill {
-  background: rgba(83, 141, 78, 0.2);
-  color: #6aaa64;
-  border: 1px solid #538d4e;
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 11px;
-  letter-spacing: 2px;
 }
 
 .longest-section {
@@ -887,7 +872,7 @@ button.home-calendar-cell:focus-visible {
   font-size: 18px;
 }
 
-.score-actions {
+.results-actions {
   display: flex;
   justify-content: center;
   gap: 12px;
@@ -900,7 +885,7 @@ button.home-calendar-cell:focus-visible {
     height: 44px;
     font-size: 20px;
   }
-  .score-value {
+  .results-value {
     font-size: 22px;
   }
   .mode-title {

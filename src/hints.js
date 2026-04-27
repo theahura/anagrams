@@ -2,13 +2,8 @@ import { letterSignature } from './dictionary.js';
 import { isProfane } from './anagramRules.js';
 import { isTrivialInflection } from './trivialInflection.js';
 
-const MISSED_DRAW_PENALTY = 10;
 const MIN_WORD_LEN = 3;
 const MAX_LOOSE_SUBSET = 8;
-
-export function scoreWord(word) {
-  return word.length * word.length;
-}
 
 export function hasLoosePoolAnagram(looseLetters, dict) {
   if (looseLetters.length < MIN_WORD_LEN) return false;
@@ -31,11 +26,6 @@ export function hasMissedAnagram(pool, dict) {
     }
   }
   return null;
-}
-
-export function finalScore({ words, missedDrawCount }) {
-  const wordPoints = words.reduce((sum, w) => sum + scoreWord(w.word), 0);
-  return wordPoints - MISSED_DRAW_PENALTY * missedDrawCount;
 }
 
 function hasSingleParentSteal(parentWord, looseLetters, dict) {

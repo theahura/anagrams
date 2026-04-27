@@ -29,13 +29,12 @@ export function loadStore(storage) {
   return { schemaVersion: SCHEMA_VERSION, records: parsed.records };
 }
 
-export function recordDailyResult(storage, { date, score, longestWord, durationMs, history }) {
+export function recordDailyResult(storage, { date, longestWord, durationMs, history }) {
   const store = loadStore(storage);
   if (Object.prototype.hasOwnProperty.call(store.records, date)) {
     return { stored: store.records[date], wasNewRecord: false };
   }
   const entry = {
-    score,
     longestWord: longestWord || '',
     durationMs,
     completedAt: Date.now(),
@@ -69,16 +68,6 @@ export function currentStreak(records, todayDate) {
     cursor = shiftDate(cursor, -1);
   }
   return n;
-}
-
-export function bestScore(records) {
-  if (!records) return 0;
-  let best = 0;
-  for (const k of Object.keys(records)) {
-    const s = records[k]?.score ?? 0;
-    if (s > best) best = s;
-  }
-  return best;
 }
 
 export function hasCompletedDate(records, date) {

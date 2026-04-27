@@ -69,7 +69,7 @@ describe('App smoke', () => {
     expect(input.element.value.length).toBe(1);
   });
 
-  it('shows Streak and Best on the home screen when prior daily records exist', async () => {
+  it('shows Streak on the home screen when prior daily records exist and does not show a Best stat', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 3, 25, 12, 0, 0));
     const today = '2026-04-25';
@@ -77,8 +77,8 @@ describe('App smoke', () => {
     const seeded = JSON.stringify({
       schemaVersion: 1,
       records: {
-        [yesterday]: { score: 247, longestWord: 'redefine', durationMs: 90000 },
-        [today]: { score: 80, longestWord: 'cat', durationMs: 30000 },
+        [yesterday]: { longestWord: 'redefine', durationMs: 90000 },
+        [today]: { longestWord: 'cat', durationMs: 30000 },
       },
     });
     localStorage.setItem('anagrams:v1', seeded);
@@ -86,7 +86,7 @@ describe('App smoke', () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toMatch(/Streak\s*2(?!\d)/);
-    expect(wrapper.text()).toMatch(/Best\s*247(?!\d)/);
+    expect(wrapper.text()).not.toMatch(/Best/i);
 
     const calendar = wrapper.find('.home-calendar');
     expect(calendar.exists()).toBe(true);
