@@ -333,15 +333,5 @@ onBeforeUnmount(() => {
     </Teleport>
 
     <p v-if="loading" class="home-loading">Loading dictionary…</p>
-
-    <section class="rules">
-      <h2>How to play</h2>
-      <ul>
-        <li>Three tiles start face up.</li>
-        <li>Each turn, build a word from face-up letters or draw a new tile.</li>
-        <li>Combine your existing words by using <em>all</em> their letters.</li>
-        <li>Long words score more — but drawing when an obvious word is on the board costs you points.</li>
-      </ul>
-    </section>
   </section>
 </template>

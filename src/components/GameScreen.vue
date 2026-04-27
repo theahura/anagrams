@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { drawTile, submitWord, endGame } from '../game.js';
 import { finalScore, hasMissedAnagram } from '../scoring.js';
 import { highlightConsumption } from '../staging.js';
+import InstructionsPanel from './InstructionsPanel.vue';
 
 const props = defineProps({
   initialGame: { type: Object, required: true },
@@ -15,6 +16,9 @@ const trail = ref([]);
 const feedback = ref(null);
 const elapsedMs = ref(0);
 const inputRef = ref(null);
+const helpBtnRef = ref(null);
+const showInstructions = ref(true);
+let instructionsOpenedByHelp = false;
 let timerHandle = null;
 
 const typed = computed({
@@ -135,6 +139,7 @@ function tick() {
 }
 
 function onDocKeydown(e) {
+  if (showInstructions.value) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.key === 'Process' || e.repeat) return;
 
   if (e.key === ' ' || e.code === 'Space') {
@@ -157,13 +162,28 @@ onMounted(() => {
   tick();
   timerHandle = setInterval(tick, 1000);
   document.addEventListener('keydown', onDocKeydown);
-  inputRef.value?.focus();
 });
 
 onUnmounted(() => {
   if (timerHandle) clearInterval(timerHandle);
   document.removeEventListener('keydown', onDocKeydown);
 });
+
+function openInstructions() {
+  instructionsOpenedByHelp = true;
+  showInstructions.value = true;
+}
+
+async function onInstructionsClose() {
+  showInstructions.value = false;
+  await nextTick();
+  if (instructionsOpenedByHelp) {
+    helpBtnRef.value?.focus();
+  } else {
+    inputRef.value?.focus();
+  }
+  instructionsOpenedByHelp = false;
+}
 
 function clearFeedback() {
   feedback.value = null;
@@ -242,12 +262,25 @@ function formatTime(ms) {
 </script>
 
 <template>
-  <section class="game">
+  <section class="game" :inert="showInstructions || undefined">
     <div class="game-info">
       <span class="meta">{{ game.mode === 'daily' ? `Daily ${game.date}` : 'Random' }}</span>
       <span id="timer" aria-live="off">{{ formatTime(elapsedMs) }}</span>
       <span class="score">Score: {{ score }}</span>
+      <button
+        ref="helpBtnRef"
+        type="button"
+        class="instructions-trigger"
+        data-testid="open-instructions"
+        aria-label="How to play"
+        @click="openInstructions"
+      >?</button>
     </div>
+
+    <InstructionsPanel
+      v-if="showInstructions"
+      @close="onInstructionsClose"
+    />
 
     <div class="section-label">Face-up tiles · {{ faceDownCount }} face-down</div>
     <div class="tile-rack">
