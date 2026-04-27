@@ -193,40 +193,15 @@ describe('GameScreen click-to-stage interactions', () => {
     expect(wrapper.findAll('.tile-rack .tile')[1].classes()).not.toContain('used');
   });
 
-  it('renders a Clear button that resets typed input when clicked', async () => {
+  it('does not render a Clear button', () => {
     const wrapper = mount(GameScreen, {
       props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
     });
 
-    const input = wrapper.find('input.text-input');
-    await input.setValue('cat');
-
-    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
-    expect(clearBtn).toBeDefined();
-    await clearBtn.trigger('click');
-
-    expect(input.element.value).toBe('');
-  });
-
-  it('Clear button is disabled when typed input is empty', () => {
-    const wrapper = mount(GameScreen, {
-      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
-    });
-
-    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
-    expect(clearBtn.attributes('disabled')).toBeDefined();
-  });
-
-  it('Clear button is enabled when typed input is non-empty', async () => {
-    const wrapper = mount(GameScreen, {
-      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
-    });
-
-    const input = wrapper.find('input.text-input');
-    await input.setValue('c');
-
-    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
-    expect(clearBtn.attributes('disabled')).toBeUndefined();
+    const hasClear = wrapper
+      .findAll('button')
+      .some((b) => b.text().toLowerCase() === 'clear');
+    expect(hasClear).toBe(false);
   });
 });
 
@@ -368,23 +343,6 @@ describe('GameScreen sticky-claim trail', () => {
     await input.setValue('ra');
 
     expect(tiles()[1].classes()).toContain('used');
-  });
-
-  it('clearing empties typed input and removes all highlight', async () => {
-    const wrapper = mount(GameScreen, {
-      props: { initialGame: makeGame({ loose: ['r', 'a', 't'] }), dict },
-    });
-
-    const tiles = () => wrapper.findAll('.tile-rack .tile');
-    await tiles()[0].trigger('click');
-    const input = wrapper.find('input.text-input');
-    await input.setValue('rat');
-
-    const clearBtn = wrapper.findAll('button').find((b) => b.text().toLowerCase() === 'clear');
-    await clearBtn.trigger('click');
-
-    expect(input.element.value).toBe('');
-    for (const t of tiles()) expect(t.classes()).not.toContain('used');
   });
 
   it('a successful submit clears typed input AND clears any identity claims', async () => {
@@ -606,5 +564,147 @@ describe('GameScreen draw button gating', () => {
 
     const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
     expect(drawBtn.attributes('disabled')).toBeDefined();
+  });
+});
+
+describe('GameScreen keyboard shortcuts', () => {
+  it('pressing Space anywhere draws a tile (rack grows by one)', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const before = wrapper.findAll('.tile-rack .tile').length;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
+    await wrapper.vm.$nextTick();
+
+    const after = wrapper.findAll('.tile-rack .tile').length;
+    expect(after).toBe(before + 1);
+  });
+
+  it('pressing Space while the typed input is focused still draws and does not insert a space character', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+      attachTo: document.body,
+    });
+
+    const input = wrapper.find('input.text-input');
+    await input.setValue('ca');
+    input.element.focus();
+    expect(document.activeElement).toBe(input.element);
+
+    const before = wrapper.findAll('.tile-rack .tile').length;
+    await input.trigger('keydown', { key: ' ', code: 'Space' });
+    await wrapper.vm.$nextTick();
+
+    expect(input.element.value).toBe('ca');
+    expect(wrapper.findAll('.tile-rack .tile').length).toBe(before + 1);
+    wrapper.unmount();
+  });
+
+  it('pressing Space when the bag is empty does not change the rack', async () => {
+    const game = {
+      ...makeGame({ loose: ['a', 'b', 'c'] }),
+      pool: { faceDown: [], looseLetters: ['a', 'b', 'c'], words: [] },
+    };
+    const wrapper = mount(GameScreen, { props: { initialGame: game, dict } });
+
+    const before = wrapper.findAll('.tile-rack .tile').length;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.findAll('.tile-rack .tile').length).toBe(before);
+  });
+
+  it('typing a letter when no field is focused appends to the typed input', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+      attachTo: document.body,
+    });
+
+    document.body.focus();
+    const input = wrapper.find('input.text-input');
+    expect(document.activeElement).not.toBe(input.element);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+    await wrapper.vm.$nextTick();
+
+    expect(input.element.value).toBe('r');
+    wrapper.unmount();
+  });
+
+  it('focuses the typed input when the screen mounts', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+      attachTo: document.body,
+    });
+    await wrapper.vm.$nextTick();
+
+    const input = wrapper.find('input.text-input');
+    expect(document.activeElement).toBe(input.element);
+    wrapper.unmount();
+  });
+
+  it('holding Space (auto-repeat) does not draw repeatedly', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const before = wrapper.findAll('.tile-rack .tile').length;
+    for (let i = 0; i < 5; i++) {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', code: 'Space', repeat: true, bubbles: true })
+      );
+    }
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.findAll('.tile-rack .tile').length).toBe(before);
+  });
+
+  it('routing a letter from a non-focused state clears stale feedback', async () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+      attachTo: document.body,
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    await drawBtn.trigger('click');
+    expect(wrapper.find('.feedback').classes()).toContain('warning');
+
+    document.body.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }));
+    await wrapper.vm.$nextTick();
+
+    const feedback = wrapper.find('.feedback');
+    expect(feedback.classes()).toContain('feedback-empty');
+    expect(feedback.text()).toBe('');
+    wrapper.unmount();
+  });
+});
+
+describe('GameScreen shortcut indicators on buttons', () => {
+  it('Submit button surfaces an Enter shortcut indicator', () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const submitBtn = wrapper.findAll('button').find((b) => /Submit/.test(b.text()));
+    expect(submitBtn).toBeDefined();
+    const kbd = submitBtn.find('kbd');
+    expect(kbd.exists()).toBe(true);
+    const indicator = `${kbd.text()} ${kbd.attributes('aria-label') || ''}`;
+    expect(indicator).toMatch(/enter|↵/i);
+  });
+
+  it('Draw button surfaces a Space shortcut indicator', () => {
+    const wrapper = mount(GameScreen, {
+      props: { initialGame: makeGame({ loose: ['c', 'a', 't'] }), dict },
+    });
+
+    const drawBtn = wrapper.findAll('button').find((b) => /Draw tile/.test(b.text()));
+    expect(drawBtn).toBeDefined();
+    const kbd = drawBtn.find('kbd');
+    expect(kbd.exists()).toBe(true);
+    const indicator = `${kbd.text()} ${kbd.attributes('aria-label') || ''}`;
+    expect(indicator).toMatch(/space|␣/i);
   });
 });

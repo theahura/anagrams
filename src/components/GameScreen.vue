@@ -130,23 +130,39 @@ function onWordClick(i) {
   refocusInput();
 }
 
-function onClear() {
-  trail.value = [];
-  clearFeedback();
-  refocusInput();
-}
-
 function tick() {
   elapsedMs.value = Date.now() - game.value.startTime;
+}
+
+function onDocKeydown(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.key === 'Process' || e.repeat) return;
+
+  if (e.key === ' ' || e.code === 'Space') {
+    if (canDraw.value) {
+      e.preventDefault();
+      onDraw();
+    }
+    return;
+  }
+
+  if (e.key.length === 1 && /^[a-zA-Z]$/.test(e.key) && e.target !== inputRef.value) {
+    e.preventDefault();
+    inputRef.value?.focus();
+    typed.value = typed.value + e.key;
+    clearFeedback();
+  }
 }
 
 onMounted(() => {
   tick();
   timerHandle = setInterval(tick, 1000);
+  document.addEventListener('keydown', onDocKeydown);
+  inputRef.value?.focus();
 });
 
 onUnmounted(() => {
   if (timerHandle) clearInterval(timerHandle);
+  document.removeEventListener('keydown', onDocKeydown);
 });
 
 function clearFeedback() {
@@ -276,8 +292,7 @@ function formatTime(ms) {
         spellcheck="false"
         @input="clearFeedback"
       />
-      <button type="button" class="action-btn" :disabled="!typed" @click="onClear">Clear</button>
-      <button type="submit" class="action-btn primary">Submit</button>
+      <button type="submit" class="action-btn primary">Submit <kbd aria-label="Enter">↵</kbd></button>
     </form>
 
     <div
@@ -291,7 +306,7 @@ function formatTime(ms) {
 
     <div class="game-actions">
       <button class="action-btn" :disabled="!canDraw" @click="onDraw">
-        Draw tile ({{ faceDownCount }})
+        Draw tile ({{ faceDownCount }}) <kbd aria-label="Space">␣</kbd>
       </button>
       <button class="action-btn danger" @click="onEndGame">End game</button>
     </div>
