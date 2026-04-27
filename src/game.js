@@ -8,6 +8,8 @@ const INITIAL_REVEAL = 3;
 
 export function createGame({ mode, date }, dict) {
   const rng = mode === 'daily' ? getDailyRng(date) : getRandomRng();
+  const ghostRng =
+    mode === 'daily' ? getDailyRng(`${date}:ghost`) : getRandomRng();
   const tiles = shuffleTiles(createTileSet(), rng);
   let pool = createPool(tiles);
   for (let i = 0; i < INITIAL_REVEAL; i++) {
@@ -21,6 +23,7 @@ export function createGame({ mode, date }, dict) {
     missedDrawCount: 0,
     ended: false,
     startTime: Date.now(),
+    ghostRng,
   };
 }
 
@@ -78,7 +81,9 @@ export function endGame(game, nowMs) {
     longestChain,
     totalTimeMs,
     missedDrawCount: game.missedDrawCount,
-    words: game.pool.words.map((w) => w.word),
+    words: game.pool.words
+      .filter((w) => w.owner !== 'ghost')
+      .map((w) => w.word),
     history,
   };
 }

@@ -8,15 +8,20 @@ import App from '../src/components/App.vue';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DICT_PATH = path.resolve(__dirname, '..', 'data', 'dictionary.json');
 const LEMMAS_PATH = path.resolve(__dirname, '..', 'data', 'lemmas.json');
+const COMMON_PATH = path.resolve(__dirname, '..', 'data', 'common-words.json');
 const dictionaryJson = JSON.parse(readFileSync(DICT_PATH, 'utf8'));
 const lemmasJson = JSON.parse(readFileSync(LEMMAS_PATH, 'utf8'));
+const commonJson = JSON.parse(readFileSync(COMMON_PATH, 'utf8'));
 
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url) => {
       const href = String(url);
-      const body = href.endsWith('lemmas.json') ? lemmasJson : dictionaryJson;
+      let body;
+      if (href.endsWith('lemmas.json')) body = lemmasJson;
+      else if (href.endsWith('common-words.json')) body = commonJson;
+      else body = dictionaryJson;
       return {
         ok: true,
         status: 200,
@@ -104,6 +109,9 @@ describe('App smoke', () => {
         const href = String(url);
         if (href.endsWith('lemmas.json')) {
           return { ok: false, status: 500, json: async () => ({}) };
+        }
+        if (href.endsWith('common-words.json')) {
+          return { ok: true, status: 200, json: async () => commonJson };
         }
         return { ok: true, status: 200, json: async () => dictionaryJson };
       })

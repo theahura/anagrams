@@ -97,4 +97,30 @@ describe('formWord', () => {
     });
     expect(pool).toEqual(before);
   });
+
+  it('tags the new word with owner=human by default', () => {
+    const pool = { faceDown: [], looseLetters: ['c', 'a', 't'], words: [] };
+    const next = formWord(pool, {
+      word: 'cat',
+      consumedLoose: ['c', 'a', 't'],
+      consumedWordIndices: [],
+    });
+    expect(next.words[0].owner).toBe('human');
+  });
+
+  it('tags the new word with the provided owner', () => {
+    const pool = {
+      faceDown: [],
+      looseLetters: ['s'],
+      words: [{ word: 'cat', parents: [], owner: 'human' }],
+    };
+    const next = formWord(pool, {
+      word: 'cats',
+      consumedLoose: ['s'],
+      consumedWordIndices: [0],
+      owner: 'ghost',
+    });
+    expect(next.words[0].owner).toBe('ghost');
+    expect(next.words[0].word).toBe('cats');
+  });
 });

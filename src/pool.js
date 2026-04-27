@@ -20,7 +20,7 @@ export function drawTile(pool) {
   };
 }
 
-export function formWord(pool, { word, consumedLoose, consumedWordIndices }) {
+export function formWord(pool, { word, consumedLoose, consumedWordIndices, owner = 'human' }) {
   const remainingLoose = removeMultiset(pool.looseLetters, consumedLoose);
   const consumedSet = new Set(consumedWordIndices);
   const consumedParents = consumedWordIndices.map((i) => pool.words[i].word);
@@ -28,7 +28,7 @@ export function formWord(pool, { word, consumedLoose, consumedWordIndices }) {
   return {
     ...pool,
     looseLetters: remainingLoose,
-    words: [...remainingWords, { word, parents: consumedParents }],
+    words: [...remainingWords, { word, parents: consumedParents, owner }],
   };
 }
 

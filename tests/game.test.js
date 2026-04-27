@@ -46,6 +46,28 @@ describe('createGame', () => {
     expect(game.pool.words).toEqual([]);
     expect(game.missedDrawCount).toBe(0);
   });
+
+  it('attaches a ghostRng function to daily games that is deterministic for the same date', () => {
+    const a = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    const b = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    expect(typeof a.ghostRng).toBe('function');
+    const seqA = [a.ghostRng(), a.ghostRng(), a.ghostRng()];
+    const seqB = [b.ghostRng(), b.ghostRng(), b.ghostRng()];
+    expect(seqA).toEqual(seqB);
+  });
+
+  it('produces a different ghostRng stream for different daily dates', () => {
+    const a = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    const b = createGame({ mode: 'daily', date: '2026-04-26' }, dict);
+    const seqA = [a.ghostRng(), a.ghostRng(), a.ghostRng()];
+    const seqB = [b.ghostRng(), b.ghostRng(), b.ghostRng()];
+    expect(seqA).not.toEqual(seqB);
+  });
+
+  it('attaches a ghostRng function to random games', () => {
+    const game = createGame({ mode: 'random' }, dict);
+    expect(typeof game.ghostRng).toBe('function');
+  });
 });
 
 describe('drawTile', () => {
@@ -183,6 +205,25 @@ describe('endGame', () => {
     const result = endGame(withHistory, 1000);
     expect(result.longestWord).toBe('cat');
     expect(result.longestChain).toEqual(['cat']);
+  });
+
+  it('excludes ghost-owned words from result.words', () => {
+    const game = createGame({ mode: 'daily', date: '2026-04-25' }, dict);
+    const withGhostWord = {
+      ...game,
+      pool: {
+        ...game.pool,
+        words: [
+          { word: 'cat', parents: [], owner: 'human' },
+          { word: 'brook', parents: ['rook'], owner: 'ghost' },
+        ],
+      },
+      history: [{ word: 'cat', parents: [] }],
+      missedDrawCount: 0,
+      startTime: 0,
+    };
+    const result = endGame(withGhostWord, 1000);
+    expect(result.words).toEqual(['cat']);
   });
 });
 

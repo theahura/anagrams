@@ -1,10 +1,11 @@
 const LEMMA_SCHEMA_VERSION = 1;
+const COMMON_SCHEMA_VERSION = 1;
 
 export function letterSignature(word) {
   return word.toLowerCase().split('').sort().join('');
 }
 
-export function loadDictionary(json, lemmasJson) {
+export function loadDictionary(json, lemmasJson, commonJson) {
   const words = json.words || [];
   const set = new Set(words.map((w) => w.toLowerCase()));
   const signatureIndex = new Map();
@@ -28,10 +29,25 @@ export function loadDictionary(json, lemmasJson) {
   for (const [word, lemmas] of Object.entries(lemmasJson.lemmas)) {
     lemmaIndex.set(word.toLowerCase(), lemmas);
   }
+  let commonSet = null;
+  if (commonJson) {
+    if (commonJson.schemaVersion !== COMMON_SCHEMA_VERSION) {
+      throw new Error(
+        `loadDictionary: commonJson schemaVersion ${commonJson.schemaVersion} != ${COMMON_SCHEMA_VERSION}`
+      );
+    }
+    const commonWords = commonJson.words || [];
+    commonSet = new Set(commonWords.map((w) => w.toLowerCase()));
+  }
   return {
     isWord(word) {
       if (!word) return false;
       return set.has(word.toLowerCase());
+    },
+    isCommonWord(word) {
+      if (!word) return false;
+      if (!commonSet) return false;
+      return commonSet.has(word.toLowerCase());
     },
     signatureIndex,
     lemmaIndex,

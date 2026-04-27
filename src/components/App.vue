@@ -44,17 +44,21 @@ async function ensureDictionary() {
   try {
     const dictUrl = new URL('../../data/dictionary.json', import.meta.url);
     const lemmasUrl = new URL('../../data/lemmas.json', import.meta.url);
-    const [dictRes, lemmasRes] = await Promise.all([
+    const commonUrl = new URL('../../data/common-words.json', import.meta.url);
+    const [dictRes, lemmasRes, commonRes] = await Promise.all([
       fetch(dictUrl),
       fetch(lemmasUrl),
+      fetch(commonUrl),
     ]);
     if (!dictRes.ok) throw new Error(`dictionary HTTP ${dictRes.status}`);
     if (!lemmasRes.ok) throw new Error(`lemmas HTTP ${lemmasRes.status}`);
-    const [dictJson, lemmasJson] = await Promise.all([
+    if (!commonRes.ok) throw new Error(`common-words HTTP ${commonRes.status}`);
+    const [dictJson, lemmasJson, commonJson] = await Promise.all([
       dictRes.json(),
       lemmasRes.json(),
+      commonRes.json(),
     ]);
-    dict.value = loadDictionary(dictJson, lemmasJson);
+    dict.value = loadDictionary(dictJson, lemmasJson, commonJson);
     return dict.value;
   } catch (err) {
     dictError.value = err.message;
