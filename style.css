@@ -295,6 +295,21 @@ button.word-row {
   background: rgba(181, 159, 59, 0.1);
 }
 
+.action-btn kbd {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.85;
+}
+
 .game-actions {
   display: flex;
   justify-content: space-between;
